@@ -1,0 +1,95 @@
+{
+  "model_version": "v1.0.0-gatv2",
+  "model_type": "GATv2",
+  "architecture": "GATv2Conv x 3 + Linear x 2",
+  "feature_names": [
+    "behavioural_risk_score",
+    "avg_tx_amount",
+    "total_tx_count",
+    "sent_count",
+    "received_count",
+    "unique_sender_count",
+    "unique_recipient_count",
+    "fan_in_score",
+    "fan_out_score",
+    "short_dwell_count",
+    "amount_split_flag",
+    "cross_bank_tx_count",
+    "is_monitored",
+    "degree_centrality",
+    "in_degree",
+    "out_degree",
+    "pagerank_score",
+    "risk_propagation_score",
+    "bank_sbi",
+    "bank_axis",
+    "bank_iob",
+    "has_cycle"
+  ],
+  "node_feature_dim": 22,
+  "edge_feature_dim": 10,
+  "num_classes": 3,
+  "class_names": [
+    "NORMAL",
+    "SUSPICIOUS",
+    "MULE"
+  ],
+  "training_date": "2026-09-07T17:05:56.408802",
+  "training_time_sec": 8.21,
+  "training_samples": 644,
+  "val_samples": 206,
+  "test_samples": 206,
+  "augmented_subgraphs": 25,
+  "hyperparams": {
+    "hidden_dim": 64,
+    "heads_layer1": 4,
+    "heads_layer2": 2,
+    "heads_layer3": 1,
+    "dropout": 0.35,
+    "learning_rate": 0.003,
+    "weight_decay": 0.0005,
+    "epochs": 120,
+    "early_stop_patience": 18,
+    "scheduler_step": 40,
+    "scheduler_gamma": 0.5
+  },
+  "label_distribution": {
+    "NORMAL": 623,
+    "SUSPICIOUS": 147,
+    "MULE": 80
+  },
+  "training_metrics": {
+    "final_train_loss": 1.1797654628753662
+  },
+  "validation_metrics": {
+    "accuracy": 0.3981,
+    "f1_score": 0.3444,
+    "precision": 0.5819,
+    "recall": 0.3937
+  },
+  "test_metrics": {
+    "accuracy": 0.3495,
+    "f1_score": 0.2881,
+    "per_class": {
+      "NORMAL": {
+        "precision": 0.6388888888888888,
+        "recall": 0.21296296296296297,
+        "f1_score": 0.3194444444444444,
+        "support": 108
+      },
+      "SUSPICIOUS": {
+        "precision": 0.2754491017964072,
+        "recall": 0.8363636363636363,
+        "f1_score": 0.4144144144144144,
+        "support": 55
+      },
+      "MULE": {
+        "precision": 1.0,
+        "recall": 0.06976744186046512,
+        "f1_score": 0.13043478260869565,
+        "support": 43
+      }
+    }
+  },
+  "status": "TRAINED"
+}

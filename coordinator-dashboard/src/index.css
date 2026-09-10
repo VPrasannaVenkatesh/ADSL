@@ -1,0 +1,292 @@
+/* ============================================================
+   DECENTRALIZED RISK COORDINATOR — GLOBAL STYLES
+   Module 3: Privacy-Preserving Bank Risk Sharing
+   ============================================================ */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap');
+
+:root {
+  --bg-base:        #04060A;
+  --bg-surface:     #090D14;
+  --bg-card:        #0E1420;
+  --bg-card-hover:  #141C2C;
+  --border:         rgba(255,255,255,0.08);
+  --border-bright:  rgba(255,255,255,0.16);
+  --text-primary:   #F1F5F9;
+  --text-secondary: #94A3B8;
+  --text-muted:     #475569;
+
+  /* Decision Action Colours */
+  --allow:             #10B981;
+  --monitor:           #F59E0B;
+  --review:            #F97316;
+  --controlled-action: #EF4444;
+
+  /* Bank Theme Colours */
+  --sbi:  #3B82F6;
+  --axis: #EC4899;
+  --iob:  #F59E0B;
+
+  /* Accent */
+  --accent:       #8B5CF6;
+  --accent-light: rgba(139,92,246,0.18);
+  --cyan:         #06B6D4;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 15px; }
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  min-height: 100vh;
+  line-height: 1.55;
+}
+
+.mono { font-family: 'JetBrains Mono', monospace; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--bg-base); }
+::-webkit-scrollbar-thumb { background: #2A354A; border-radius: 4px; }
+
+/* Cards */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  transition: border-color 0.2s;
+}
+.card:hover { border-color: var(--border-bright); }
+
+/* Decision Badges */
+.badge-decision {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.badge-ALLOW {
+  background: rgba(16,185,129,0.15);
+  color: var(--allow);
+  border: 1px solid rgba(16,185,129,0.35);
+}
+
+.badge-MONITOR {
+  background: rgba(245,158,11,0.15);
+  color: var(--monitor);
+  border: 1px solid rgba(245,158,11,0.35);
+}
+
+.badge-REVIEW {
+  background: rgba(249,115,22,0.16);
+  color: var(--review);
+  border: 1px solid rgba(249,115,22,0.4);
+}
+
+.badge-CONTROLLED_ACTION {
+  background: rgba(239,68,68,0.20);
+  color: var(--controlled-action);
+  border: 1px solid rgba(239,68,68,0.5);
+  box-shadow: 0 0 10px rgba(239,68,68,0.3);
+  animation: pulse-crit 2s infinite;
+}
+
+@keyframes pulse-crit {
+  0%, 100% { box-shadow: 0 0 6px rgba(239,68,68,0.2); }
+  50%       { box-shadow: 0 0 14px rgba(239,68,68,0.5); }
+}
+
+/* Risk level pill */
+.badge-level {
+  display: inline-flex;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.level-LOW      { background: rgba(16,185,129,0.12); color: var(--allow); }
+.level-MEDIUM   { background: rgba(245,158,11,0.12); color: var(--monitor); }
+.level-HIGH     { background: rgba(249,115,22,0.12); color: var(--review); }
+.level-CRITICAL { background: rgba(239,68,68,0.16);  color: var(--controlled-action); font-weight: 800; }
+
+/* Score progress bar */
+.score-bar {
+  height: 6px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+.score-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 15px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  transition: all 0.18s;
+}
+.btn-primary  { background: var(--accent); color: #fff; }
+.btn-primary:hover  { filter: brightness(1.12); }
+.btn-outline  { background: transparent; color: var(--text-secondary); border-color: var(--border-bright); }
+.btn-outline:hover  { background: var(--bg-card-hover); color: var(--text-primary); }
+.btn-active   { background: var(--accent-light); color: var(--accent); border-color: var(--accent); }
+
+/* Table */
+.coord-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.coord-table th {
+  text-align: left;
+  padding: 11px 12px;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  white-space: nowrap;
+}
+.coord-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.coord-table tr { cursor: pointer; transition: background 0.15s; }
+.coord-table tr:hover td { background: var(--bg-card-hover); }
+.coord-table tr.selected td { background: rgba(139,92,246,0.09); }
+
+/* Input */
+.filter-input {
+  background: var(--bg-card);
+  border: 1px solid var(--border-bright);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.82rem;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.filter-input:focus { border-color: var(--accent); }
+.filter-input::placeholder { color: var(--text-muted); }
+
+/* Slide-in drawer */
+.drawer {
+  position: fixed;
+  right: 0;
+  top: 0;
+  height: 100vh;
+  width: 520px;
+  background: var(--bg-card);
+  border-left: 1px solid var(--border-bright);
+  overflow-y: auto;
+  z-index: 200;
+  animation: slide-in 0.25s ease;
+}
+@keyframes slide-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.60);
+  z-index: 199;
+}
+
+/* Live blink */
+.live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10B981;
+  animation: blink 1.4s infinite;
+}
+@keyframes blink {
+  0%,100% { opacity: 1; } 50% { opacity: 0.3; }
+}
+
+@media (max-width: 960px) {
+  .drawer { width: 100vw; }
+}
+
+/* Dynamic Graph Canvas Animations */
+@keyframes flowDash {
+  from { stroke-dashoffset: 24; }
+  to   { stroke-dashoffset: 0; }
+}
+
+.flow-line-pulse {
+  animation: flowDash 1.2s linear infinite;
+}
+
+@keyframes haloPulse {
+  0% {
+    r: 22px;
+    opacity: 0.9;
+  }
+  50% {
+    r: 32px;
+    opacity: 0.4;
+  }
+  100% {
+    r: 40px;
+    opacity: 0;
+  }
+}
+
+.node-pulse-halo {
+  animation: haloPulse 2.2s cubic-bezier(0.2, 0.8, 0.4, 1) infinite;
+  pointer-events: none;
+}
+
+@keyframes alertSlideDown {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.alert-toast-banner {
+  animation: alertSlideDown 0.3s ease-out;
+}
+
+.live-pulse-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34D399;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+

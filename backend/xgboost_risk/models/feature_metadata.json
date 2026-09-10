@@ -1,0 +1,120 @@
+{
+  "model_version": "v2.0.0-multiclass-autonomous",
+  "trained_at": "2026-09-08T19:54:36.866168",
+  "total_dataset_size": 23000,
+  "training_samples": 18400,
+  "test_samples": 4600,
+  "num_classes": 4,
+  "class_names": [
+    "NORMAL",
+    "SUSPICIOUS",
+    "MULE_FLOW",
+    "CRITICAL_FRAUD"
+  ],
+  "metrics": {
+    "accuracy": 0.9996,
+    "macro_precision": 0.9983,
+    "macro_recall": 0.9997,
+    "macro_f1": 0.999,
+    "weighted_f1": 0.9996,
+    "log_loss": 0.0035,
+    "per_class": {
+      "NORMAL": {
+        "class_id": 0,
+        "f1_score": 0.9995,
+        "test_support": 1063
+      },
+      "SUSPICIOUS": {
+        "class_id": 1,
+        "f1_score": 0.9985,
+        "test_support": 344
+      },
+      "MULE_FLOW": {
+        "class_id": 2,
+        "f1_score": 0.9998,
+        "test_support": 2941
+      },
+      "CRITICAL_FRAUD": {
+        "class_id": 3,
+        "f1_score": 0.998,
+        "test_support": 252
+      }
+    },
+    "confusion_matrix": [
+      [
+        1062,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        344,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        2940,
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        252
+      ]
+    ]
+  },
+  "top_features": [
+    {
+      "feature": "receiver_fan_in",
+      "importance": 0.1685899943113327
+    },
+    {
+      "feature": "network_rapid_forwarding",
+      "importance": 0.14747999608516693
+    },
+    {
+      "feature": "receiver_unique_senders",
+      "importance": 0.12143000215291977
+    },
+    {
+      "feature": "sender_behavioural_risk_score",
+      "importance": 0.0619099996984005
+    },
+    {
+      "feature": "sender_fan_out",
+      "importance": 0.041450001299381256
+    },
+    {
+      "feature": "sender_unique_recipients",
+      "importance": 0.04022999852895737
+    },
+    {
+      "feature": "is_business",
+      "importance": 0.03359999880194664
+    },
+    {
+      "feature": "sender_total_amount_sent",
+      "importance": 0.03068999946117401
+    },
+    {
+      "feature": "amount",
+      "importance": 0.027380000799894333
+    },
+    {
+      "feature": "receiver_received_count",
+      "importance": 0.02718999981880188
+    },
+    {
+      "feature": "network_amount_splitting",
+      "importance": 0.026820000261068344
+    },
+    {
+      "feature": "sender_forwarded_amount",
+      "importance": 0.024460000917315483
+    }
+  ]
+}

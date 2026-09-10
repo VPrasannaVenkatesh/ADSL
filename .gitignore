@@ -1,0 +1,45 @@
+# Node Dependencies
+node_modules/
+*/node_modules/
+*/*/node_modules/
+
+# Python virtual environments & caches
+venv/
+.venv/
+env/
+__pycache__/
+*/__pycache__/
+*/*/__pycache__/
+*/*/*/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*/.pytest_cache/
+
+# Environment variables & local credentials
+.env
+.env.*
+.env*
+*.env
+**/.env
+**/.env*
+!**/.env.example
+*.pem
+*.key
+*.cert
+
+# Production builds
+dist/
+*/dist/
+build/
+*/build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
