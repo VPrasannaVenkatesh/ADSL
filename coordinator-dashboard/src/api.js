@@ -108,6 +108,16 @@ export const coordinatorApi = {
 
   getRlDecisions: (limit = 50) =>
     fetchJSON(`/adsl/rl-decisions?limit=${limit}`),
+
+  getAdslTransactions: (limit = 60) =>
+    fetchJSON(`/api/adsl/transactions?limit=${limit}`),
+
+  getTransactionGraph: (transactionId) =>
+    fetchJSON(`/api/adsl/transaction-graph/${transactionId}`),
+
+  triggerMuleSinkFlow: () =>
+    fetchJSON(`/api/adsl/simulate/mule-sink`, { method: 'POST' }),
 };
+
 
 

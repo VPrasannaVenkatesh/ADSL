@@ -79,7 +79,7 @@ class MonitoringManager:
     ) -> Dict[str, Any]:
         """Registers a new transaction under dynamic monitoring."""
         with self._lock:
-            case_id = f"MON_{transaction_id[:16]}"
+            case_id = f"MON_{transaction_id}"
             now_iso = datetime.now().isoformat()
             
             genuine_ind = [
@@ -101,6 +101,21 @@ class MonitoringManager:
                             genuine_indicators, suspicious_indicators, status, created_at, updated_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)
                         ON CONFLICT(case_id) DO UPDATE SET
+                            transaction_id = excluded.transaction_id,
+                            account_id = excluded.account_id,
+                            counterparty_account_id = excluded.counterparty_account_id,
+                            bank = excluded.bank,
+                            amount = excluded.amount,
+                            initial_risk_score = excluded.initial_risk_score,
+                            monitoring_reason = excluded.monitoring_reason,
+                            genuine_indicators = excluded.genuine_indicators,
+                            suspicious_indicators = excluded.suspicious_indicators,
+                            status = 'ACTIVE',
+                            follow_up_transaction_count = 0,
+                            total_follow_up_amount = 0.0,
+                            rapid_forward_detected = 0,
+                            final_outcome = NULL,
+                            resolution_notes = NULL,
                             updated_at = excluded.updated_at
                     """, (
                         case_id, transaction_id, account_id, counterparty_account_id,
@@ -127,6 +142,8 @@ class MonitoringManager:
         new_amount: float,
         is_rapid_forward: bool = False,
         is_suspicious_counterparty: bool = False,
+        is_genuine_flow: bool = False,
+        new_risk_score: float = 0.0,
     ):
         """Updates active monitoring cases for an account when follow-up transactions occur."""
         with self._lock:
@@ -142,16 +159,20 @@ class MonitoringManager:
                         follow_cnt = c["follow_up_transaction_count"] + 1
                         total_amt = c["total_follow_up_amount"] + new_amount
                         now_iso = datetime.now().isoformat()
+                        tx_id_orig = c["transaction_id"]
+                        bank_orig = c["bank"]
 
                         # Evaluate if escalating or resolving
-                        if is_rapid_forward or is_suspicious_counterparty:
+                        if is_rapid_forward or is_suspicious_counterparty or new_risk_score > 60.0:
                             new_status = "ESCALATED_TO_HIGH_RISK"
-                            outcome = "ESCALATED"
-                            notes = "Rapid onward forwarding / suspicious counterparty observed during monitoring window."
-                        elif follow_cnt >= 3 and not is_rapid_forward:
+                            outcome = "HONEYPOT"
+                            notes = "Rapid onward forwarding / suspicious mule behaviour observed during monitoring window."
+                            self._update_original_tx_status(bank_orig, tx_id_orig, "HONEYPOT", "HONEYPOT", "LIEN_APPLIED")
+                        elif is_genuine_flow or (new_risk_score <= 30.0 and not is_rapid_forward) or follow_cnt >= 2:
                             new_status = "RESOLVED_AS_GENUINE"
-                            outcome = "RESOLVED_GENUINE"
-                            notes = "Subsequent account activity normalized without onward dispersal."
+                            outcome = "GENUINE"
+                            notes = "Subsequent account activity normalized — genuine transaction flow confirmed."
+                            self._update_original_tx_status(bank_orig, tx_id_orig, "COMPLETED", "NONE", "NONE")
                         else:
                             new_status = "ACTIVE"
                             outcome = None
@@ -174,6 +195,39 @@ class MonitoringManager:
                 conn.close()
             except Exception as e:
                 print(f"[MonitoringManager] Error recording subsequent activity: {e}")
+
+    def _update_original_tx_status(self, bank: str, transaction_id: str, new_status: str, honeypot_status: str, lien_status: str):
+        """Updates bank database transaction record and in-memory graph when monitoring case completes."""
+        try:
+            from simulator.db_connection import get_all_bank_connections
+            conns = get_all_bank_connections()
+            for b_name, b_conn in conns.items():
+                with b_conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE transactions SET
+                            transaction_status = %s,
+                            honeypot_status = %s,
+                            lien_status = %s
+                        WHERE transaction_id = %s
+                    """, (new_status, honeypot_status, lien_status, transaction_id))
+                    cur.execute("""
+                        UPDATE transaction_risk_assessments SET
+                            transaction_status = %s,
+                            honeypot_status = %s,
+                            lien_status = %s,
+                            final_decision = %s,
+                            updated_at = NOW()
+                        WHERE transaction_id = %s
+                    """, (new_status, honeypot_status, lien_status, new_status, transaction_id))
+                b_conn.commit()
+                b_conn.close()
+        except Exception as e:
+            print(f"[MonitoringManager] Error updating original tx in bank db: {e}")
+        try:
+            from network_monitoring.graph_engine import GLOBAL_NETWORK_GRAPH
+            GLOBAL_NETWORK_GRAPH.update_transaction_status(transaction_id, new_status)
+        except Exception:
+            pass
 
     def observe_account_activity(self, account_id: str, activity: Dict[str, Any]):
         """Alias for observing subsequent activity on monitored account."""

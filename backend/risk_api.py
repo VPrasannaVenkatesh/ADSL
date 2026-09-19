@@ -76,3 +76,20 @@ def get_account_risk_direct(account_id: str):
             "last_updated": "now",
         }
 
+@app.get("/api/accounts")
+def get_accounts_direct(bank: str = "ALL", limit: int = 100):
+    from risk_engine.api_routes import get_flagged_accounts
+    return get_flagged_accounts(bank=bank, limit=limit)
+
+@app.get("/api/accounts/{bank}/{account_id}/report")
+def get_account_report_direct(bank: str, account_id: str):
+    from risk_engine.api_routes import get_account_report
+    return get_account_report(account_id=account_id, bank=bank)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    print("Starting Bank Risk API on http://localhost:8001 ...")
+    uvicorn.run("risk_api:app", host="0.0.0.0", port=8001, reload=True)
+
+

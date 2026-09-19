@@ -290,21 +290,15 @@ class TransactionLifecyclePipeline:
                 "reasons": sender_net["reasons"] + receiver_net["reasons"],
             }
 
-            # Canonical threshold resolution per Sections 12 & 28
-            # < 30 -> COMPLETED (approx 60%)
-            # 30 to 50 -> MONITORING (approx 20%)
-            # 50 to 85 -> UNDER_REVIEW with Lien Applied (approx 10%)
-            # 85 to 95 -> RESTRICTED (approx 7%)
-            # >= 95 -> FROZEN (approx 3%)
+            # Canonical threshold resolution (Section 13 & 14)
+            # 0 - 30   -> COMPLETED (ALLOW)
+            # 31 - 60  -> MONITORING (MONITOR)
+            # 61 - 100 -> HONEYPOT (HONEYPOT + LIEN APPLIED)
             effective_score = max(comb_score, max_net_score if should_escalate else 0.0)
 
-            if effective_score >= 95.0 or policy_decision == "FREEZE":
-                final_status = "FROZEN"
-            elif effective_score >= 85.0 or policy_decision == "CONTROLLED_ACTION":
-                final_status = "RESTRICTED"
-            elif effective_score >= 50.0 or combined_result["flagged"] or initial_status == "UNDER_REVIEW":
-                final_status = "UNDER_REVIEW"
-            elif effective_score >= 30.0 or initial_status == "MONITORING":
+            if effective_score > 60.0 or policy_decision in ("HONEYPOT", "CONTROLLED_ACTION", "FREEZE") or combined_result["flagged"]:
+                final_status = "HONEYPOT"
+            elif effective_score > 30.0 or policy_decision == "MONITOR":
                 final_status = "MONITORING"
             else:
                 final_status = "COMPLETED"
@@ -332,12 +326,12 @@ class TransactionLifecyclePipeline:
 
         # ── Step 14: CONTROLLED FUNDS / LIEN LAYER ───────────────────────────
         lien_receipt = None
-        if final_status in ("UNDER_REVIEW", "RESTRICTED", "FROZEN"):
-            lien_type = "FREEZE" if final_status == "FROZEN" else ("RESTRICTION" if final_status == "RESTRICTED" else "LIEN")
+        if final_status in ("HONEYPOT", "UNDER_REVIEW", "RESTRICTED", "FROZEN"):
+            lien_type = "LIEN"
             lien_reason = (
-                f"[{final_status}] Combined Risk {comb_score:.1f}/100. "
-                f"Patterns: {network_analysis['detected_patterns'] or 'Suspicious Flow'}. "
-                f"Funds temporarily controlled pending Admin review."
+                f"[{final_status}] Transaction Risk {comb_score:.1f}/100. "
+                f"Mule/Risk Patterns: {network_analysis['detected_patterns'] or 'Suspicious High Risk'}. "
+                f"Suspicious funds placed under Lien protection."
             )
             lien_receipt = GLOBAL_LIEN_LAYER.place_lien(
                 transaction_id=rec.transaction_id,
@@ -351,9 +345,11 @@ class TransactionLifecyclePipeline:
 
         # ── Step 8: FINALIZE STATUS & HALT FLOW IF STOPPED ───────────────────
         rec.status = final_status
-        rec.flow_stopped = final_status in ("UNDER_REVIEW", "RESTRICTED", "FROZEN")
+        rec.flow_stopped = final_status in ("HONEYPOT", "UNDER_REVIEW", "RESTRICTED", "FROZEN")
         GLOBAL_NETWORK_GRAPH.update_transaction_status(rec.transaction_id, final_status)
-        self._update_db_transaction_status(rec.transaction_id, sender_bank, receiver_bank, final_status)
+        h_stat = "HONEYPOT" if final_status == "HONEYPOT" else "NONE"
+        l_stat = "LIEN_APPLIED" if lien_receipt else "NONE"
+        self._update_db_transaction_status(rec.transaction_id, sender_bank, receiver_bank, final_status, h_stat, l_stat)
 
         # ── Step 12: GNN NETWORK RISK (Async — only for MEDIUM/HIGH/CRITICAL) ─
         gnn_analysis = {
@@ -443,6 +439,12 @@ class TransactionLifecyclePipeline:
                 network_risk=network_analysis["network_risk_score"],
                 final_decision=policy_decision,
                 transaction_status=final_status,
+                transaction_type=tx_type,
+                device_ip=device_ip,
+                location=location,
+                account_type="BUSINESS" if features.get("is_business") == 1.0 else "PERSONAL",
+                honeypot_status=h_stat,
+                lien_status=l_stat,
             )
 
             # If cross-bank, also store in receiver bank DB
@@ -471,6 +473,12 @@ class TransactionLifecyclePipeline:
                     network_risk=network_analysis["network_risk_score"],
                     final_decision=policy_decision,
                     transaction_status=final_status,
+                    transaction_type=tx_type,
+                    device_ip=device_ip,
+                    location=location,
+                    account_type="BUSINESS" if features.get("is_business") == 1.0 else "PERSONAL",
+                    honeypot_status=h_stat,
+                    lien_status=l_stat,
                 )
         except Exception as _st_err:
             print(f"[Unified Storage Error]: {_st_err}")
@@ -485,36 +493,40 @@ class TransactionLifecyclePipeline:
             "xgboost_risk_score": combined_result["xgboost_risk_score"],
             "combined_risk_score": combined_result["combined_risk_score"],
             "risk_level": combined_result["risk_level"],
-            "flagged": combined_result["flagged"],
+            "prediction_probability": combined_result["prediction_probability"],
             "top_risk_factors": combined_result["top_risk_factors"],
-            "dwell_time_seconds": dwell_sec,
-            "network_analysis": network_analysis,
-            "provenance_summary": {
-                "inflow": provenance.get("total_inflow", 0),
-                "outflow": provenance.get("total_outflow", 0),
-                "pass_through_ratio": provenance.get("pass_through_ratio", 0.0),
-            },
-            "risk_propagation": {
-                "contextual_risk": propagation.get("network_contextual_risk", 0.0),
-                "composite_risk": propagation.get("composite_propagated_risk", 0.0),
-                "is_elevated": propagation.get("is_contextually_elevated", False),
-            },
-            "ppo_decision": ppo_eval,
+            "model_version": combined_result["model_version"],
+            "network_risk_score": network_analysis["network_risk_score"],
+            "detected_patterns": network_analysis["detected_patterns"],
+            "provenance_chain": provenance.get("trace_chain", []),
+            "risk_propagation": propagation,
+            "ppo_action": ppo_eval.get("recommended_action"),
             "lien_receipt": lien_receipt,
+            "gnn_analysis": gnn_analysis,
         }
 
         return rec, lifecycle_metadata
 
-    def _update_db_transaction_status(self, tx_id: str, sender_bank: str, receiver_bank: str, status: str):
-        """Updates the transaction_status column in PostgreSQL databases."""
+    def _update_db_transaction_status(
+        self,
+        tx_id: str,
+        sender_bank: str,
+        receiver_bank: str,
+        status: str,
+        honeypot_status: str = "NONE",
+        lien_status: str = "NONE",
+    ):
+        """Updates transaction_status, honeypot_status, lien_status columns in PostgreSQL databases."""
         try:
             s_conn = self.conns[sender_bank]
             with s_conn.cursor() as cur:
                 cur.execute("""
                     UPDATE transactions
-                    SET transaction_status = %s
+                    SET transaction_status = %s,
+                        honeypot_status = %s,
+                        lien_status = %s
                     WHERE transaction_id = %s
-                """, (status, tx_id))
+                """, (status, honeypot_status, lien_status, tx_id))
             s_conn.commit()
         except Exception:
             pass
@@ -525,9 +537,11 @@ class TransactionLifecyclePipeline:
                 with r_conn.cursor() as cur:
                     cur.execute("""
                         UPDATE transactions
-                        SET transaction_status = %s
+                        SET transaction_status = %s,
+                            honeypot_status = %s,
+                            lien_status = %s
                         WHERE transaction_id = %s
-                    """, (status, tx_id))
+                    """, (status, honeypot_status, lien_status, tx_id))
                 r_conn.commit()
             except Exception:
                 pass

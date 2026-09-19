@@ -99,6 +99,21 @@ def adsl_rl_decisions_direct(limit: int = 50):
     decisions = GLOBAL_RL_AGENT.get_recent_decisions(limit=limit)
     return {"count": len(decisions), "decisions": decisions}
 
+@app.get("/adsl/transactions")
+def adsl_transactions_direct(limit: int = 60):
+    from coordinator.adsl_service import get_recent_adsl_transactions
+    txns = get_recent_adsl_transactions(limit=limit)
+    return {"count": len(txns), "transactions": txns}
+
+@app.get("/adsl/transaction-graph/{transaction_id}")
+def adsl_tx_graph_direct(transaction_id: str):
+    from coordinator.mule_network_manager import GLOBAL_MULE_NETWORKS
+    from fastapi import HTTPException
+    graph_data = GLOBAL_MULE_NETWORKS.get_subgraph_for_transaction(transaction_id)
+    if not graph_data:
+        raise HTTPException(status_code=404, detail="Transaction not found in graph")
+    return graph_data
+
 @app.get("/")
 def root():
     return {
@@ -112,4 +127,11 @@ def root():
             "/api/coordinator/decisions"
         ]
     }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    print("Starting ADSL / Coordinator API on http://localhost:8002 ...")
+    uvicorn.run("coordinator_api:app", host="0.0.0.0", port=8002, reload=True)
+
 

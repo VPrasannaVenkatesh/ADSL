@@ -114,6 +114,51 @@ export function AssessmentDrawer({ assessment, onClose }) {
           <InfoRow label="Amount" value={formatINR(assessment.amount)} />
           <InfoRow label="Type" value={assessment.transaction_type} />
           <InfoRow label="Timestamp" value={assessment.assessment_timestamp ? new Date(assessment.assessment_timestamp).toLocaleString('en-IN') : '–'} />
+
+          {/* Download Report Button */}
+          <div style={{ marginTop: 12 }}>
+            <button
+              onClick={async () => {
+                const b = assessment.bank_name || 'SBI';
+                const acc = assessment.account_id;
+                try {
+                  const res = await fetch(`/api/accounts/${b}/${acc}/report`);
+                  if (res.ok) {
+                    const data = await res.json();
+                    const text = data.report_text || JSON.stringify(data, null, 2);
+                    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${b}_Forensic_Report_${acc}.txt`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  }
+                } catch (e) {
+                  console.error('Failed to download report:', e);
+                }
+              }}
+              style={{
+                width: '100%',
+                padding: '9px 12px',
+                borderRadius: 6,
+                border: '1px solid rgba(16, 185, 129, 0.4)',
+                background: 'rgba(16, 185, 129, 0.15)',
+                color: '#34D399',
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+            >
+              <span>Download Official Forensic Report (.txt)</span>
+            </button>
+          </div>
         </div>
 
         {/* 8 Risk Components */}

@@ -81,6 +81,20 @@ const LIFECYCLE_BADGES = {
     border: '1px solid rgba(239, 68, 68, 0.5)',
     icon: ShieldAlert,
   },
+  HONEYPOT: {
+    label: 'HONEYPOT',
+    bg: 'rgba(239, 68, 68, 0.25)',
+    color: '#F87171',
+    border: '1px solid rgba(239, 68, 68, 0.55)',
+    icon: ShieldAlert,
+  },
+  'LIEN APPLIED': {
+    label: 'LIEN APPLIED',
+    bg: 'rgba(239, 68, 68, 0.25)',
+    color: '#F87171',
+    border: '1px solid rgba(239, 68, 68, 0.55)',
+    icon: ShieldAlert,
+  },
   FROZEN: {
     label: 'FROZEN',
     bg: 'rgba(159, 18, 57, 0.35)',

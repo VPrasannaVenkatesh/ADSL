@@ -71,13 +71,15 @@ def get_model_info():
 @xgboost_router.get("/predictions")
 def get_predictions(
     bank: str = Query("ALL", description="SBI, AXIS, IOB, or ALL"),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(60, ge=1, le=200),
     offset: int = Query(0, ge=0),
     flagged_only: bool = Query(False),
     risk_level: Optional[str] = Query(None),
+    status_filter: Optional[str] = Query(None),
 ):
     """
     Returns live stored XGBoost transaction risk assessments from PostgreSQL databases.
+    Supports filtering by bank, risk_level ('LOW', 'MEDIUM', 'HIGH'), and status ('COMPLETED', 'MONITORING', 'HONEYPOT').
     """
     conns = get_all_bank_connections()
     assessments = get_recent_transaction_risk_assessments(
@@ -87,6 +89,7 @@ def get_predictions(
         offset=offset,
         flagged_only=flagged_only,
         risk_level=risk_level,
+        status_filter=status_filter,
     )
     return {
         "count": len(assessments),

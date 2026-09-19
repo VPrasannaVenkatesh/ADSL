@@ -16,6 +16,7 @@ import {
   Smartphone,
   MapPin,
   TrendingUp,
+  Download,
 } from 'lucide-react';
 import { simulatorApi } from '../api/simulatorApi';
 
@@ -48,6 +49,27 @@ export function AccountDrawer({ bank, accountId, onClose }) {
   const txns = profile?.recent_transactions || [];
 
   const formatCurrency = (amt) => `₹${Number(amt || 0).toLocaleString('en-IN')}`;
+
+  const handleDownloadDossier = async () => {
+    try {
+      const res = await fetch(`/api/accounts/${bank || 'SBI'}/${accountId}/report`);
+      if (res.ok) {
+        const data = await res.json();
+        const text = data.report_text || JSON.stringify(data, null, 2);
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${bank || 'BANK'}_Account_Dossier_${accountId}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      console.error('Failed to download dossier:', e);
+    }
+  };
 
   const isBusiness = (acc.account_category || '').toUpperCase() === 'BUSINESS' ||
                      (acc.account_type || '').toUpperCase() === 'CURRENT' ||
@@ -188,6 +210,29 @@ export function AccountDrawer({ bank, accountId, onClose }) {
                   {acc.is_active !== false ? 'ACCOUNT ACTIVE' : 'RESTRICTED / FROZEN'}
                 </div>
               </div>
+
+              {/* Download Official Dossier Button */}
+              <button
+                onClick={handleDownloadDossier}
+                style={{
+                  padding: '9px 14px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(0, 229, 255, 0.35)',
+                  background: 'rgba(0, 229, 255, 0.12)',
+                  color: 'var(--accent-cyan, #00E5FF)',
+                  fontSize: '0.78rem',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Download size={14} />
+                <span>Download Official Account Dossier (.txt)</span>
+              </button>
 
               {/* Grid of basic fields */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '0.8rem' }}>

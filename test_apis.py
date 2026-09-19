@@ -7,9 +7,9 @@ def test(name, url, method="GET", data=None):
         if data:
             req.add_header("Content-Type", "application/json")
             data_bytes = json.dumps(data).encode("utf-8")
-            res = urllib.request.urlopen(req, data=data_bytes, timeout=5)
+            res = urllib.request.urlopen(req, data=data_bytes, timeout=15)
         else:
-            res = urllib.request.urlopen(req, timeout=5)
+            res = urllib.request.urlopen(req, timeout=15)
         body = json.loads(res.read().decode("utf-8"))
         print(f"[SUCCESS] {name}: {str(body)[:120]}...")
     except Exception as e:

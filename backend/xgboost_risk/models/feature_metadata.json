@@ -1,120 +1,152 @@
 {
-  "model_version": "v2.0.0-multiclass-autonomous",
-  "trained_at": "2026-09-08T19:54:36.866168",
-  "total_dataset_size": 23000,
-  "training_samples": 18400,
-  "test_samples": 4600,
-  "num_classes": 4,
-  "class_names": [
-    "NORMAL",
-    "SUSPICIOUS",
-    "MULE_FLOW",
-    "CRITICAL_FRAUD"
+  "model_version": "v3.0.0-continuous-regressor",
+  "model_type": "XGBRegressor",
+  "trained_at": "2026-09-17T21:14:55.870501",
+  "total_dataset_size": 7200,
+  "training_samples": 5760,
+  "test_samples": 1440,
+  "num_features": 68,
+  "feature_names": [
+    "amount",
+    "is_cross_bank",
+    "recipient_is_new",
+    "beneficiary_usage_frequency",
+    "is_night",
+    "hour_of_day",
+    "is_unusual_hour",
+    "tx_type_upi",
+    "tx_type_imps",
+    "tx_type_neft",
+    "tx_type_bank_transfer",
+    "device_is_mobile",
+    "device_is_laptop",
+    "device_is_tablet",
+    "device_is_other",
+    "is_new_device",
+    "sender_device_changes",
+    "is_location_deviation",
+    "sender_location_changes",
+    "device_location_anomaly",
+    "is_business",
+    "expected_turnover_or_volume",
+    "amount_vs_turnover_ratio",
+    "is_within_operating_hours",
+    "sender_balance",
+    "transfer_percentage_of_balance",
+    "sender_amount_vs_avg_ratio",
+    "sender_amount_vs_max_ratio",
+    "sender_sent_count",
+    "sender_received_count",
+    "sender_total_amount_sent",
+    "sender_total_amount_received",
+    "sender_avg_tx_amount",
+    "sender_max_tx_amount",
+    "sender_unique_recipients",
+    "sender_unique_senders",
+    "sender_tx_1h",
+    "sender_tx_6h",
+    "sender_tx_24h",
+    "sender_avg_interval_sec",
+    "sender_min_interval_sec",
+    "sender_burst_ratio",
+    "sender_velocity_ratio",
+    "sender_night_tx_count",
+    "sender_fan_out",
+    "sender_fan_in",
+    "sender_forwarded_amount",
+    "sender_short_dwell_count",
+    "sender_amount_split_count",
+    "sender_behavioural_risk_score",
+    "receiver_received_count",
+    "receiver_sent_count",
+    "receiver_total_amount_received",
+    "receiver_avg_tx_amount",
+    "receiver_max_tx_amount",
+    "receiver_unique_senders",
+    "receiver_tx_1h",
+    "receiver_tx_24h",
+    "receiver_fan_in",
+    "receiver_fan_out",
+    "receiver_short_dwell_count",
+    "receiver_behavioural_risk_score",
+    "network_rapid_forwarding",
+    "network_short_dwell_flag",
+    "network_amount_splitting",
+    "network_cycle_detected",
+    "mule_multihop_signal",
+    "sudden_in_out_surge"
+  ],
+  "risk_levels": [
+    "LOW",
+    "MEDIUM",
+    "HIGH"
   ],
   "metrics": {
-    "accuracy": 0.9996,
-    "macro_precision": 0.9983,
-    "macro_recall": 0.9997,
-    "macro_f1": 0.999,
-    "weighted_f1": 0.9996,
-    "log_loss": 0.0035,
-    "per_class": {
-      "NORMAL": {
-        "class_id": 0,
-        "f1_score": 0.9995,
-        "test_support": 1063
-      },
-      "SUSPICIOUS": {
-        "class_id": 1,
-        "f1_score": 0.9985,
-        "test_support": 344
-      },
-      "MULE_FLOW": {
-        "class_id": 2,
-        "f1_score": 0.9998,
-        "test_support": 2941
-      },
-      "CRITICAL_FRAUD": {
-        "class_id": 3,
-        "f1_score": 0.998,
-        "test_support": 252
-      }
-    },
-    "confusion_matrix": [
-      [
-        1062,
-        1,
-        0,
-        0
-      ],
-      [
-        0,
-        344,
-        0,
-        0
-      ],
-      [
-        0,
-        0,
-        2940,
-        1
-      ],
-      [
-        0,
-        0,
-        0,
-        252
-      ]
-    ]
+    "rmse": 1.375,
+    "mae": 1.085,
+    "r2_score": 0.9964,
+    "tier_accuracy": 0.9764
   },
   "top_features": [
     {
-      "feature": "receiver_fan_in",
-      "importance": 0.1685899943113327
+      "feature": "sender_velocity_ratio",
+      "importance": 0.645330011844635
     },
     {
-      "feature": "network_rapid_forwarding",
-      "importance": 0.14747999608516693
+      "feature": "sender_sent_count",
+      "importance": 0.11400000005960464
     },
     {
-      "feature": "receiver_unique_senders",
-      "importance": 0.12143000215291977
+      "feature": "is_location_deviation",
+      "importance": 0.0478300005197525
+    },
+    {
+      "feature": "sender_device_changes",
+      "importance": 0.03725999966263771
+    },
+    {
+      "feature": "amount_vs_turnover_ratio",
+      "importance": 0.03629999980330467
+    },
+    {
+      "feature": "is_unusual_hour",
+      "importance": 0.020969999954104424
+    },
+    {
+      "feature": "is_night",
+      "importance": 0.012190000154078007
+    },
+    {
+      "feature": "sender_amount_vs_avg_ratio",
+      "importance": 0.011669999919831753
     },
     {
       "feature": "sender_behavioural_risk_score",
-      "importance": 0.0619099996984005
+      "importance": 0.010730000212788582
     },
     {
-      "feature": "sender_fan_out",
-      "importance": 0.041450001299381256
+      "feature": "network_short_dwell_flag",
+      "importance": 0.006949999835342169
     },
     {
-      "feature": "sender_unique_recipients",
-      "importance": 0.04022999852895737
+      "feature": "is_cross_bank",
+      "importance": 0.0064199999906122684
     },
     {
-      "feature": "is_business",
-      "importance": 0.03359999880194664
+      "feature": "receiver_tx_24h",
+      "importance": 0.005239999853074551
     },
     {
-      "feature": "sender_total_amount_sent",
-      "importance": 0.03068999946117401
+      "feature": "receiver_short_dwell_count",
+      "importance": 0.005150000099092722
     },
     {
-      "feature": "amount",
-      "importance": 0.027380000799894333
+      "feature": "beneficiary_usage_frequency",
+      "importance": 0.004970000125467777
     },
     {
-      "feature": "receiver_received_count",
-      "importance": 0.02718999981880188
-    },
-    {
-      "feature": "network_amount_splitting",
-      "importance": 0.026820000261068344
-    },
-    {
-      "feature": "sender_forwarded_amount",
-      "importance": 0.024460000917315483
+      "feature": "sender_avg_tx_amount",
+      "importance": 0.004120000172406435
     }
   ]
 }

@@ -3,6 +3,14 @@ FastAPI Router for Bank-Level Behavioural Risk Assessments.
 Provides endpoints for live risk monitoring, summaries, filtering, and detail drawers.
 """
 
+import os
+import sys
+
+# Ensure backend root is in sys.path
+_backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if _backend_root not in sys.path:
+    sys.path.insert(0, _backend_root)
+
 import json
 from datetime import datetime
 from typing import Optional, List
@@ -325,7 +333,235 @@ def get_all_risk_profiles(
     return {"profiles": profiles[:limit], "count": len(profiles)}
 
 
+@router.get("/flagged-accounts")
+def get_flagged_accounts(
+    bank: Optional[str] = Query("ALL"),
+    min_score: float = Query(45.0),
+    risk_level: Optional[str] = Query(None),
+    limit: int = Query(100, le=200),
+):
+    """
+    Returns flagged and high-risk accounts joined with customer details and behavioural risk factors.
+    """
+    banks = BANK_NAMES if (not bank or bank.upper() == "ALL") else [bank.upper()]
+    results = []
+
+    for b in banks:
+        try:
+            conn = get_bank_connection(b)
+            with conn.cursor() as cur:
+                where = ["(p.risk_score >= %s OR p.risk_level IN ('HIGH', 'CRITICAL'))"]
+                params = [min_score]
+                if risk_level:
+                    where.append("p.risk_level = %s")
+                    params.append(risk_level.upper())
+
+                cur.execute(f"""
+                    SELECT p.account_id, p.bank_name, p.risk_score, p.risk_level, p.risk_factors,
+                           p.last_trigger_reason, p.last_updated,
+                           COALESCE(a.customer_name, 'Account Holder'),
+                           COALESCE(a.account_number, p.account_id),
+                           COALESCE(a.account_type, 'SAVINGS'),
+                           COALESCE(a.current_balance, 0),
+                           COALESCE(a.account_status, 'ACTIVE'),
+                           COALESCE(a.home_location, 'Domestic')
+                    FROM account_risk_profiles p
+                    LEFT JOIN accounts a ON p.account_id = a.account_id
+                    WHERE {" AND ".join(where)}
+                    ORDER BY p.risk_score DESC, p.last_updated DESC
+                    LIMIT %s
+                """, params + [limit])
+
+                for r in cur.fetchall():
+                    factors = r[4]
+                    if isinstance(factors, str):
+                        try:
+                            factors = json.loads(factors)
+                        except Exception:
+                            factors = [factors]
+                    elif not isinstance(factors, list):
+                        factors = []
+
+                    status = r[11]
+                    if r[3] in ('CRITICAL', 'HIGH') and status == 'ACTIVE':
+                        status = 'UNDER_MONITORING'
+
+                    results.append({
+                        "account_id": r[0],
+                        "bank": r[1],
+                        "bank_name": r[1],
+                        "risk_score": round(float(r[2]), 1),
+                        "risk_level": r[3],
+                        "risk_factors": factors,
+                        "last_trigger_reason": r[5] or "BEHAVIOURAL_ANOMALY",
+                        "last_updated": r[6].isoformat() if r[6] else None,
+                        "customer_name": r[7],
+                        "account_number": r[8],
+                        "account_type": r[9],
+                        "current_balance": int(r[10]),
+                        "account_status": status,
+                        "home_location": r[12],
+                    })
+            conn.close()
+        except Exception as e:
+            print(f"[RISK API] Flagged accounts error for {b}: {e}")
+
+    results.sort(key=lambda x: x["risk_score"], reverse=True)
+    return {"accounts": results[:limit], "count": len(results[:limit])}
+
+
+@router.get("/account/{account_id}/report")
+def get_account_report(account_id: str, bank: Optional[str] = None):
+    """Generates official institutional forensic compliance report."""
+    bank_name = bank.upper() if bank else None
+    if not bank_name:
+        for b in BANK_NAMES:
+            if account_id.upper().startswith(b):
+                bank_name = b
+                break
+    if not bank_name:
+        bank_name = "SBI"
+
+    profile = {}
+    try:
+        conn = get_bank_connection(bank_name)
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT p.account_id, p.bank_name, p.risk_score, p.risk_level, p.risk_factors,
+                       p.last_trigger_reason, p.last_updated,
+                       a.customer_name, a.account_number, a.account_type, a.current_balance, a.account_status, a.home_location
+                FROM account_risk_profiles p
+                LEFT JOIN accounts a ON p.account_id = a.account_id
+                WHERE p.account_id = %s
+            """, (account_id,))
+            r = cur.fetchone()
+            if r:
+                factors = r[4]
+                if isinstance(factors, str):
+                    try:
+                        factors = json.loads(factors)
+                    except Exception:
+                        factors = [factors]
+                profile = {
+                    "account_id": r[0], "bank": r[1], "risk_score": r[2], "risk_level": r[3],
+                    "risk_factors": factors or [], "last_trigger_reason": r[5], "last_updated": r[6],
+                    "customer_name": r[7], "account_number": r[8], "account_type": r[9],
+                    "current_balance": r[10], "account_status": r[11], "home_location": r[12]
+                }
+        conn.close()
+    except Exception as e:
+        print(f"Report query error: {e}")
+
+    report_lines = [
+        "================================================================================",
+        "        OFFICIAL INSTITUTIONAL FORENSIC AUDIT & RISK REPORT",
+        "================================================================================",
+        f"Generated At: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        f"Target Account ID: {account_id}",
+        f"Issuing Institution: {profile.get('bank', bank_name)} CORE BANKING SYSTEM",
+        f"Account Holder: {profile.get('customer_name', 'Verified Customer')}",
+        f"Account Number: {profile.get('account_number', account_id)}",
+        f"Account Type: {profile.get('account_type', 'SAVINGS')}",
+        f"Current Balance: ₹{int(profile.get('current_balance') or 0):,}",
+        f"Jurisdiction / Registered Home: {profile.get('home_location') or 'National'}",
+        "--------------------------------------------------------------------------------",
+        "                      BEHAVIOURAL RISK ASSESSMENT",
+        "--------------------------------------------------------------------------------",
+        f"Dynamic Risk Score: {profile.get('risk_score', 75.0)} / 100.0",
+        f"Assigned Risk Level: {profile.get('risk_level', 'HIGH')}",
+        f"Account Operational Status: {profile.get('account_status', 'UNDER_MONITORING')}",
+        f"Last Trigger Reason: {profile.get('last_trigger_reason', 'Behavioural Velocity Anomaly')}",
+        "",
+        "PRIMARY RISK FACTORS & PATTERN FLAGS DETECTED:",
+    ]
+    for factor in profile.get('risk_factors', ['Automated behavioural anomaly detected']):
+        report_lines.append(f"  • {factor}")
+
+    report_lines.extend([
+        "",
+        "--------------------------------------------------------------------------------",
+        "                    REGULATORY & CONSORTIUM VERDICT",
+        "--------------------------------------------------------------------------------",
+        "ADSL Autonomous Layer Policy: RESTRICTIVE VELOCITY CAP & AUTOMATED MONITORING",
+        "Recommended Action: High surveillance; verify counterparty lineage prior to release.",
+        "Consortium Signal: Broadcast to SBI, AXIS, and IOB Risk Oracles.",
+        "================================================================================",
+        "END OF FORENSIC DOSSIER",
+        "================================================================================",
+    ])
+
+    return {
+        "account_id": account_id,
+        "bank": bank_name,
+        "report_text": "\n".join(report_lines),
+    }
+
+
 @router.get("/health")
 def health():
     return {"status": "ok", "service": "Bank Risk API"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+
+    print("=" * 70)
+    print("  BANK BEHAVIOURAL RISK ENGINE & API ROUTES (MODULE 2)")
+    print("=" * 70)
+
+    # 1. Query DB Summary directly
+    print("\n[1] Querying Risk Assessments from Bank Databases...")
+    try:
+        summary_data = get_risk_summary()
+        summary = summary_data.get("summary", {})
+        by_bank = summary_data.get("by_bank", {})
+        print(f"    Total Risk Assessments : {summary.get('total', 0):,}")
+        print(f"    Risk Breakdown         : LOW={summary.get('LOW', 0):,}, MEDIUM={summary.get('MEDIUM', 0):,}, HIGH={summary.get('HIGH', 0):,}, CRITICAL={summary.get('CRITICAL', 0):,}")
+        for bank_name, counts in by_bank.items():
+            print(f"    • {bank_name:<5} -> LOW: {counts.get('LOW', 0):<5} | MEDIUM: {counts.get('MEDIUM', 0):<5} | HIGH: {counts.get('HIGH', 0):<3} | CRITICAL: {counts.get('CRITICAL', 0):<3}")
+    except Exception as e:
+        print(f"    [!] Error querying summary: {e}")
+
+    # 2. Query Recent Sample Assessments
+    print("\n[2] Fetching Latest Sample Risk Assessments...")
+    try:
+        sample_data = get_assessments(limit=3)
+        assessments = sample_data.get("assessments", [])
+        for a in assessments:
+            print(f"    • Tx: {a.get('transaction_id')} | Bank: {a.get('bank_name')} ({a.get('role')}) | Score: {a.get('final_risk_score')}/100 [{a.get('risk_level')}]")
+            print(f"      Reasons: {a.get('risk_reasons')}")
+    except Exception as e:
+        print(f"    [!] Error querying assessments: {e}")
+
+    # 3. Query Stored Risk Profiles
+    print("\n[3] Fetching Stored Behavioral Risk Profiles...")
+    try:
+        profiles_data = get_all_risk_profiles(limit=3)
+        profiles = profiles_data.get("profiles", [])
+        for p in profiles:
+            print(f"    • Account: {p.get('account_id')} ({p.get('bank_name')}) | Risk Score: {p.get('risk_score')}/100 [{p.get('risk_level')}] | Recalcs: {p.get('recalculation_count')}")
+    except Exception as e:
+        print(f"    [!] Error querying profiles: {e}")
+
+    print("\n" + "=" * 70)
+    print("  Starting FastAPI Server on http://localhost:8001 (Docs: /docs)")
+    print("=" * 70)
+
+    app = FastAPI(
+        title="Bank Risk API (Direct Runner)",
+        description="Bank Risk Behavioural Monitoring API",
+        version="2.0.0",
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.include_router(router)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
+
 

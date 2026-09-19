@@ -1,8 +1,10 @@
 """
-Multi-Class XGBoost Model Trainer and Evaluator.
-Trains an XGBClassifier on 4 granular risk classes:
-  0: NORMAL, 1: SUSPICIOUS, 2: MULE_FLOW, 3: CRITICAL_FRAUD
-Computes multi-class metrics, per-class F1, ranks feature importances, and persists artifacts.
+Continuous XGBoost Model Trainer and Evaluator.
+Trains an XGBRegressor on continuous risk targets (0.0 to 100.0) with RMSE optimization:
+- Computes regression metrics (RMSE, MAE, R2)
+- Evaluates 3-tier risk classification accuracy (LOW <= 30, MEDIUM 31-60, HIGH > 60)
+- Ranks feature importances across all 68 canonical features
+- Persists model artifact and metadata
 """
 
 import os
@@ -13,15 +15,7 @@ from typing import Dict, Any, Tuple
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import (
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    confusion_matrix,
-    classification_report,
-    log_loss,
-)
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, classification_report
 import xgboost as xgb
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -30,35 +24,35 @@ from .config import (
     METADATA_PATH,
     MODEL_VERSION,
     FEATURE_NAMES,
-    RISK_CLASSES,
-    NUM_CLASSES,
+    RISK_LEVELS,
     XGBOOST_HYPERPARAMS,
+    score_to_risk_level,
 )
 from .dataset_generator import generate_training_dataset
 
 
 def train_xgboost_model(sample_limit: int = 24000) -> Dict[str, Any]:
     """
-    Orchestrates 4-class multi-category dataset generation, model training,
-    multi-class evaluation, and artifact saving.
+    Orchestrates continuous dataset generation, XGBRegressor training,
+    multi-metric evaluation, and model artifact persistence.
     """
     print("=" * 72)
-    print(f"  Training High-Accuracy Multi-Class XGBoost Model [{MODEL_VERSION}]")
-    print(f"  Target Classes ({NUM_CLASSES}): {', '.join(RISK_CLASSES)}")
+    print(f"  Training Continuous XGBoost Risk Regressor [{MODEL_VERSION}]")
+    print(f"  Target: Continuous Risk Score [0.0 - 100.0] | 3 Tiers: LOW, MEDIUM, HIGH")
     print("=" * 72)
 
-    # 1. Generate Multi-Class Dataset
+    # 1. Generate Continuous Dataset
     X_df, y_arr = generate_training_dataset(sample_limit=sample_limit)
 
-    # 2. Stratified Train / Test Split
+    # 2. Train / Test Split
     X_train, X_test, y_train, y_test = train_test_split(
-        X_df, y_arr, test_size=0.20, random_state=42, stratify=y_arr
+        X_df, y_arr, test_size=0.20, random_state=42
     )
 
     hyperparams = dict(XGBOOST_HYPERPARAMS)
 
-    print(f"[Trainer] Fitting XGBClassifier ({NUM_CLASSES} classes) on {len(X_train)} samples...")
-    model = xgb.XGBClassifier(**hyperparams)
+    print(f"[Trainer] Fitting XGBRegressor on {len(X_train)} samples across {len(FEATURE_NAMES)} features...")
+    model = xgb.XGBRegressor(**hyperparams)
     model.fit(
         X_train,
         y_train,
@@ -66,38 +60,31 @@ def train_xgboost_model(sample_limit: int = 24000) -> Dict[str, Any]:
         verbose=False,
     )
 
-    # 3. Evaluate Multi-Class Performance
-    y_pred_proba = model.predict_proba(X_test)
-    y_pred = np.argmax(y_pred_proba, axis=1)
+    # 3. Evaluate Regression Performance
+    y_pred = model.predict(X_test)
+    y_pred = np.clip(y_pred, 0.0, 100.0)
 
-    acc = float(accuracy_score(y_test, y_pred))
-    macro_prec = float(precision_score(y_test, y_pred, average="macro", zero_division=0))
-    macro_rec = float(recall_score(y_test, y_pred, average="macro", zero_division=0))
-    macro_f1 = float(f1_score(y_test, y_pred, average="macro", zero_division=0))
-    weighted_f1 = float(f1_score(y_test, y_pred, average="weighted", zero_division=0))
-    m_loss = float(log_loss(y_test, y_pred_proba))
+    rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
+    mae = float(mean_absolute_error(y_test, y_pred))
+    r2 = float(r2_score(y_test, y_pred))
 
-    per_class_f1 = f1_score(y_test, y_pred, average=None, zero_division=0)
-    per_class_metrics = {}
-    for idx, name in enumerate(RISK_CLASSES):
-        per_class_metrics[name] = {
-            "class_id": idx,
-            "f1_score": round(float(per_class_f1[idx]), 4),
-            "test_support": int(np.sum(y_test == idx)),
-        }
+    # 4. Evaluate 3-Tier Classification Accuracy
+    true_tiers = [score_to_risk_level(s) for s in y_test]
+    pred_tiers = [score_to_risk_level(s) for s in y_pred]
+    
+    tier_accuracy = float(np.mean([t == p for t, p in zip(true_tiers, pred_tiers)]))
 
-    cm = confusion_matrix(y_test, y_pred).tolist()
+    print("\n[Trainer] Continuous Regression Results:")
+    print(f"  Root Mean Squared Error (RMSE) : {rmse:.3f}")
+    print(f"  Mean Absolute Error (MAE)     : {mae:.3f}")
+    print(f"  R² Goodness of Fit            : {r2:.4f}")
+    print(f"  3-Tier Risk Accuracy          : {tier_accuracy*100:.2f}%")
 
-    print("\n[Trainer] Multi-Class Model Evaluation Results:")
-    print(f"  Overall Accuracy : {acc:.4f} ({acc*100:.2f}%)")
-    print(f"  Macro F1 Score   : {macro_f1:.4f}")
-    print(f"  Weighted F1      : {weighted_f1:.4f}")
-    print(f"  Multi-Class Loss : {m_loss:.4f}")
-    print("\n  Per-Class F1 Breakdown:")
-    for name, pcm in per_class_metrics.items():
-        print(f"    • {name:15}: F1={pcm['f1_score']:.4f} (Test samples: {pcm['test_support']})")
+    # Sample predictions distribution check
+    sample_preds = y_pred[:15].round(1).tolist()
+    print(f"\n  Sample Continuous Predictions : {sample_preds}")
 
-    # 4. Feature Importances
+    # 5. Feature Importances
     importances = model.feature_importances_
     feat_importance_list = []
     for name, imp in zip(FEATURE_NAMES, importances):
@@ -107,34 +94,32 @@ def train_xgboost_model(sample_limit: int = 24000) -> Dict[str, Any]:
         })
     feat_importance_list.sort(key=lambda x: x["importance"], reverse=True)
 
-    print("\n[Trainer] Top 8 Contributing Features:")
-    for item in feat_importance_list[:8]:
-        print(f"  - {item['feature']:30}: {item['importance']:.4f}")
+    print("\n[Trainer] Top 10 Contributing Features:")
+    for item in feat_importance_list[:10]:
+        print(f"  - {item['feature']:32}: {item['importance']:.4f}")
 
-    # 5. Persist Model & Metadata
+    # 6. Persist Model & Metadata
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     model.save_model(MODEL_PATH)
-    print(f"\n[Trainer] Multi-Class Model saved successfully to {MODEL_PATH}")
+    print(f"\n[Trainer] Continuous XGBoost Model saved successfully to {MODEL_PATH}")
 
     metadata = {
         "model_version": MODEL_VERSION,
+        "model_type": "XGBRegressor",
         "trained_at": datetime.now().isoformat(),
         "total_dataset_size": len(X_df),
         "training_samples": len(X_train),
         "test_samples": len(X_test),
-        "num_classes": NUM_CLASSES,
-        "class_names": RISK_CLASSES,
+        "num_features": len(FEATURE_NAMES),
+        "feature_names": FEATURE_NAMES,
+        "risk_levels": RISK_LEVELS,
         "metrics": {
-            "accuracy": round(acc, 4),
-            "macro_precision": round(macro_prec, 4),
-            "macro_recall": round(macro_rec, 4),
-            "macro_f1": round(macro_f1, 4),
-            "weighted_f1": round(weighted_f1, 4),
-            "log_loss": round(m_loss, 4),
-            "per_class": per_class_metrics,
-            "confusion_matrix": cm,
+            "rmse": round(rmse, 3),
+            "mae": round(mae, 3),
+            "r2_score": round(r2, 4),
+            "tier_accuracy": round(tier_accuracy, 4),
         },
-        "top_features": feat_importance_list[:12],
+        "top_features": feat_importance_list[:15],
     }
 
     with open(METADATA_PATH, "w", encoding="utf-8") as f:

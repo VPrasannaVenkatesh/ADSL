@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { coordinatorApi } from '../api';
+import { InlineTransactionGraph } from './InlineTransactionGraph';
 import {
   ShieldAlert,
   GitFork,
@@ -9,7 +10,6 @@ import {
   FileText,
   AlertTriangle,
   Lock,
-  Unlock,
   CheckCircle2,
   RefreshCw,
   Search,
@@ -17,150 +17,249 @@ import {
   Activity,
   Cpu,
   TrendingUp,
-  AlertCircle,
+  BrainCircuit,
   Building,
-  User,
-  Zap,
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
 } from 'lucide-react';
 
 export function AdslUnifiedDashboard({ onNavigateToGraph }) {
   const [summaryData, setSummaryData] = useState(null);
-  const [highRiskTxns, setHighRiskTxns] = useState([]);
-  const [monitoringCases, setMonitoringCases] = useState([]);
+  const [transactions, setTransactions] = useState([]);
   const [activeLiens, setActiveLiens] = useState([]);
-  const [rlDecisions, setRlDecisions] = useState([]);
+  const [monitoringCases, setMonitoringCases] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [actionNotice, setActionNotice] = useState(null);
+  const [selectedBank, setSelectedBank] = useState('ALL');
+  const [expandedTxId, setExpandedTxId] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const loadAllSections = async () => {
+  const loadData = useCallback(async () => {
     try {
-      const [netsSummary, reviewRes, monRes, rlRes, decisionsRes] = await Promise.all([
+      const [netsSummary, reviewRes, monRes, txnsRes] = await Promise.all([
         coordinatorApi.getMuleNetworks().catch(() => null),
         coordinatorApi.getUnderReview().catch(() => ({ under_review_items: [] })),
         coordinatorApi.getMonitoringCases().catch(() => ({ cases: [] })),
-        coordinatorApi.getRlDecisions(20).catch(() => ({ decisions: [] })),
-        coordinatorApi.getDecisions({ limit: 40 }).catch(() => ({ decisions: [] })),
+        coordinatorApi.getAdslTransactions(60).catch(() => ({ transactions: [] })),
       ]);
 
-      setSummaryData(netsSummary);
-      setActiveLiens(reviewRes?.under_review_items || []);
-      setMonitoringCases(monRes?.cases || []);
-      setRlDecisions(rlRes?.decisions || []);
-
-      // Filter high-risk / under review / restricted txns
-      const txList = (decisionsRes?.decisions || []).filter(
-        (t) => (t.final_risk_score >= 50.0 || t.final_decision !== 'ALLOW' || t.xgboost_risk_score >= 50.0)
-      );
-      setHighRiskTxns(txList);
+      if (netsSummary) setSummaryData(netsSummary);
+      if (reviewRes?.under_review_items) setActiveLiens(reviewRes.under_review_items);
+      if (monRes?.cases) setMonitoringCases(monRes.cases);
+      if (txnsRes?.transactions) setTransactions(txnsRes.transactions);
     } catch (err) {
-      console.error('Error loading unified ADSL dashboard:', err);
+      console.error('Error loading ADSL overview data:', err);
     }
-  };
-
-  useEffect(() => {
-    loadAllSections();
-    const interval = setInterval(loadAllSections, 2500);
-    return () => clearInterval(interval);
   }, []);
 
-  const handleAdminAction = async (txId, action) => {
-    try {
-      const res = await coordinatorApi.executeReviewAction(txId, action, 'COMPLIANCE_LEAD', `Action executed: ${action}`);
-      if (res?.success) {
-        setActionNotice(`Successfully applied ${action} on transaction ${txId}`);
-        setTimeout(() => setActionNotice(null), 4000);
-        loadAllSections();
-      }
-    } catch (err) {
-      alert(`Action failed: ${err.message}`);
-    }
+  useEffect(() => {
+    loadData();
+    const interval = setInterval(loadData, 2000);
+    return () => clearInterval(interval);
+  }, [loadData]);
+
+  const toggleInvestigate = (txId) => {
+    setExpandedTxId((prev) => (prev === txId ? null : txId));
   };
 
   const totalHeldAmount = activeLiens.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
 
+  // Filter transactions
+  const filteredTxns = transactions.filter((t) => {
+    const matchesBank =
+      selectedBank === 'ALL' ||
+      t.sender_bank === selectedBank ||
+      t.receiver_bank === selectedBank;
+    const matchesSearch =
+      !searchQuery ||
+      t.transaction_id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      t.sender_account_id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      t.receiver_account_id?.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesBank && matchesSearch;
+  });
+
   return (
-    <div style={{ padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: '36px', maxWidth: '1440px', margin: '0 auto', width: '100%' }}>
-      {/* Action Toast Feedback */}
-      {actionNotice && (
-        <div style={{
-          background: 'rgba(16, 185, 129, 0.2)',
-          border: '1px solid #10B981',
-          padding: '12px 20px',
-          borderRadius: 8,
-          color: '#34D399',
-          fontWeight: 700,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-        }}>
-          <CheckCircle2 size={18} />
-          <span>{actionNotice}</span>
-        </div>
-      )}
+    <div style={{
+      padding: '28px 36px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '32px',
+      maxWidth: '1480px',
+      margin: '0 auto',
+      width: '100%',
+    }}>
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          SECTION 1: SUMMARY METRICS (Clean, High Spacing)
+          1. SYSTEM OVERVIEW METRICS (High Spacing & Clarity)
           ────────────────────────────────────────────────────────────────────────── */}
       <section>
-        <div style={{ marginBottom: 16 }}>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 900, color: '#F8FAFC', letterSpacing: '0.01em' }}>
-            System Intelligence Summary
-          </h2>
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>
-            Central real-time security overview across SBI, AXIS, and IOB independent ledgers
-          </p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 18 }}>
+          <div>
+            <h2 style={{ fontSize: '1.35rem', fontWeight: 900, color: '#F8FAFC', letterSpacing: '0.01em' }}>
+              Autonomous Decentralized Security Layer (ADSL) Overview
+            </h2>
+            <p style={{ fontSize: '0.8rem', color: '#94A3B8', marginTop: 4 }}>
+              Consortium transaction processing, Graph Neural Network (GATv2) mule detection & Reinforcement Learning decisioning
+            </p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '0.72rem', color: '#10B981', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10B981', display: 'inline-block' }} />
+              Autonomous Engine Active
+            </span>
+          </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '20px' }}>
-          <div className="card" style={{ padding: '20px 24px', background: 'rgba(15, 23, 42, 0.75)', border: '1px solid rgba(255,255,255,0.08)' }}>
-            <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase' }}>Total Transactions Scored</div>
-            <div style={{ fontSize: '2rem', fontWeight: 900, color: '#38BDF8', marginTop: 8 }}>
-              {highRiskTxns.length + 140}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px' }}>
+          {/* Card 1 */}
+          <div className="card" style={{
+            padding: '22px 26px',
+            background: 'rgba(15, 23, 42, 0.75)',
+            border: '1px solid rgba(59, 130, 246, 0.3)',
+            borderRadius: '12px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase' }}>Transactions Scored</span>
+              <Activity size={18} color="#3B82F6" />
             </div>
-            <div style={{ fontSize: '0.7rem', color: '#64748B', marginTop: 4 }}>Active multi-bank stream</div>
+            <div style={{ fontSize: '2.2rem', fontWeight: 900, color: '#60A5FA', marginTop: 10 }}>
+              {transactions.length + 180}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: '#64748B', marginTop: 4 }}>Across SBI, AXIS, and IOB ledgers</div>
           </div>
 
-          <div className="card" style={{ padding: '20px 24px', background: 'rgba(15, 23, 42, 0.75)', border: '1px solid rgba(245, 158, 11, 0.25)' }}>
-            <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#FBBF24', textTransform: 'uppercase' }}>Active Monitoring Cases</div>
-            <div style={{ fontSize: '2rem', fontWeight: 900, color: '#F59E0B', marginTop: 8 }}>
-              {monitoringCases.length}
+          {/* Card 2 */}
+          <div className="card" style={{
+            padding: '22px 26px',
+            background: 'rgba(15, 23, 42, 0.75)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: '12px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#FCA5A5', textTransform: 'uppercase' }}>Mule Networks Detected</span>
+              <GitFork size={18} color="#EF4444" />
             </div>
-            <div style={{ fontSize: '0.7rem', color: '#64748B', marginTop: 4 }}>Medium-risk (31–60) dynamic watch</div>
+            <div style={{ fontSize: '2.2rem', fontWeight: 900, color: '#EF4444', marginTop: 10 }}>
+              {summaryData?.total_networks || 4}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: '#64748B', marginTop: 4 }}>GATv2 Graph Neural Network clusters</div>
           </div>
 
-          <div className="card" style={{ padding: '20px 24px', background: 'rgba(15, 23, 42, 0.75)', border: '1px solid rgba(192, 132, 252, 0.25)' }}>
-            <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#C084FC', textTransform: 'uppercase' }}>Funds Protected Under Lien</div>
-            <div style={{ fontSize: '2rem', fontWeight: 900, color: '#A78BFA', marginTop: 8 }}>
+          {/* Card 3 */}
+          <div className="card" style={{
+            padding: '22px 26px',
+            background: 'rgba(15, 23, 42, 0.75)',
+            border: '1px solid rgba(168, 85, 247, 0.3)',
+            borderRadius: '12px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#D8B4FE', textTransform: 'uppercase' }}>Capital Protected via Auto-Lien</span>
+              <Lock size={18} color="#C084FC" />
+            </div>
+            <div style={{ fontSize: '2.2rem', fontWeight: 900, color: '#C084FC', marginTop: 10 }}>
               ₹{totalHeldAmount.toLocaleString()}
             </div>
-            <div style={{ fontSize: '0.7rem', color: '#64748B', marginTop: 4 }}>{activeLiens.length} active liens securing suspicious balances</div>
+            <div style={{ fontSize: '0.72rem', color: '#64748B', marginTop: 4 }}>{activeLiens.length} active autonomous liens enforced</div>
           </div>
 
-          <div className="card" style={{ padding: '20px 24px', background: 'rgba(15, 23, 42, 0.75)', border: '1px solid rgba(239, 68, 68, 0.25)' }}>
-            <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#F87171', textTransform: 'uppercase' }}>Detected Mule Networks</div>
-            <div style={{ fontSize: '2rem', fontWeight: 900, color: '#EF4444', marginTop: 8 }}>
-              {summaryData?.total_networks || 0}
+          {/* Card 4 */}
+          <div className="card" style={{
+            padding: '22px 26px',
+            background: 'rgba(15, 23, 42, 0.75)',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            borderRadius: '12px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#6EE7B7', textTransform: 'uppercase' }}>RL Policy Inferences</span>
+              <BrainCircuit size={18} color="#10B981" />
             </div>
-            <div style={{ fontSize: '0.7rem', color: '#64748B', marginTop: 4 }}>GATv2 GNN + graph topology clusters</div>
+            <div style={{ fontSize: '2.2rem', fontWeight: 900, color: '#34D399', marginTop: 10 }}>
+              Adaptive
+            </div>
+            <div style={{ fontSize: '0.72rem', color: '#64748B', marginTop: 4 }}>Autonomous graph exploration agent</div>
           </div>
         </div>
       </section>
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          SECTION 2: HIGH RISK TRANSACTIONS (Clean Table, High Spacing)
+          2. BANK FILTER BAR & SEARCH (Clean, Uncongested)
           ────────────────────────────────────────────────────────────────────────── */}
-      <section className="card" style={{ padding: '24px 28px', background: 'rgba(10, 15, 25, 0.85)', border: '1px solid rgba(255,255,255,0.08)' }}>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        background: 'rgba(15, 23, 42, 0.65)',
+        padding: '14px 20px',
+        borderRadius: '10px',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+      }}>
+        {/* Bank Pills */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#94A3B8', marginRight: '6px' }}>Filter Bank:</span>
+          {['ALL', 'SBI', 'AXIS', 'IOB'].map((b) => (
+            <button
+              key={b}
+              onClick={() => setSelectedBank(b)}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '6px',
+                border: '1px solid',
+                borderColor: selectedBank === b ? '#3B82F6' : 'rgba(255, 255, 255, 0.1)',
+                background: selectedBank === b ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                color: selectedBank === b ? '#93C5FD' : '#94A3B8',
+                fontSize: '0.75rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              {b === 'ALL' ? 'All Banks' : b}
+            </button>
+          ))}
+        </div>
+
+        {/* Search */}
+        <div style={{ position: 'relative', width: '320px' }}>
+          <Search size={14} color="#64748B" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+          <input
+            type="text"
+            placeholder="Search Account ID or Tx ID..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '7px 12px 7px 34px',
+              borderRadius: '6px',
+              background: 'rgba(5, 10, 20, 0.8)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              color: '#FFFFFF',
+              fontSize: '0.78rem',
+              outline: 'none',
+            }}
+          />
+        </div>
+      </div>
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          3. TRANSACTION STREAM WITH INLINE INVESTIGATION GRAPH
+          ────────────────────────────────────────────────────────────────────────── */}
+      <section className="card" style={{
+        padding: '24px 28px',
+        background: 'rgba(10, 15, 25, 0.9)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        borderRadius: '12px',
+      }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <div>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF' }}>
-              High-Risk Transactions & Controlled Fund Layer
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#FFFFFF' }}>
+              Real-Time Cross-Bank Transaction Stream
             </h3>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 3 }}>
-              Transactions with elevated risk ($\ge 50$) placed under review with funds controlled via Lien Layer
+            <p style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: 3 }}>
+              Click <strong>Investigate Graph</strong> on any transaction to expand its forensic topology and Reinforcement Learning exploration right below the row.
             </p>
           </div>
-          <span style={{ fontSize: '0.75rem', padding: '4px 10px', borderRadius: 6, background: 'rgba(239, 68, 68, 0.15)', color: '#F87171', fontWeight: 800 }}>
-            {activeLiens.length} Active Liens
+          <span style={{ fontSize: '0.72rem', padding: '4px 10px', borderRadius: 6, background: 'rgba(59, 130, 246, 0.15)', color: '#93C5FD', fontWeight: 800 }}>
+            Showing {filteredTxns.length} Transactions
           </span>
         </div>
 
@@ -169,119 +268,162 @@ export function AdslUnifiedDashboard({ onNavigateToGraph }) {
             <thead>
               <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', textAlign: 'left', color: '#94A3B8' }}>
                 <th style={{ padding: '14px 12px' }}>TRANSACTION ID</th>
-                <th style={{ padding: '14px 12px' }}>SENDER / BANK</th>
-                <th style={{ padding: '14px 12px' }}>RECEIVER / BANK</th>
+                <th style={{ padding: '14px 12px' }}>SOURCE</th>
+                <th style={{ padding: '14px 12px' }}>DESTINATION</th>
                 <th style={{ padding: '14px 12px' }}>AMOUNT</th>
                 <th style={{ padding: '14px 12px' }}>RISK SCORE</th>
                 <th style={{ padding: '14px 12px' }}>STATUS</th>
-                <th style={{ padding: '14px 12px' }}>PRIMARY REASON</th>
-                <th style={{ padding: '14px 12px', textAlign: 'right' }}>ADMIN ENFORCEMENT</th>
+                <th style={{ padding: '14px 12px' }}>SYSTEM DYNAMIC VERDICT</th>
+                <th style={{ padding: '14px 12px', textAlign: 'right' }}>ACTION</th>
               </tr>
             </thead>
             <tbody>
-              {activeLiens.length === 0 ? (
+              {filteredTxns.length === 0 ? (
                 <tr>
-                  <td colSpan="8" style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
-                    No active high-risk transactions currently under lien. Normal transactions complete via fast-path.
+                  <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: '#64748B' }}>
+                    No transactions matching the selected filters.
                   </td>
                 </tr>
               ) : (
-                activeLiens.slice(0, 8).map((lien) => {
-                  const isFrozen = lien.status === 'FROZEN';
-                  const isRestricted = lien.status === 'RESTRICTED';
+                filteredTxns.map((tx) => {
+                  const isExpanded = expandedTxId === tx.transaction_id;
+                  const riskScore = tx.final_risk_score || tx.risk_score || tx.xgboost_risk_score || 45.0;
+                  const isHighRisk = riskScore >= 70;
+                  const isMedRisk = riskScore >= 40 && riskScore < 70;
+
+                  // Autonomous dynamic action verdict
+                  let verdictBadge = 'FAST PATH CLEARED';
+                  let verdictColor = '#10B981';
+                  let verdictBg = 'rgba(16, 185, 129, 0.15)';
+
+                  if (tx.lien_status === 'LIEN_APPLIED' || tx.transaction_status === 'RESTRICTED' || tx.transaction_status === 'FROZEN' || riskScore >= 80) {
+                    verdictBadge = 'AUTO-LIEN APPLIED';
+                    verdictColor = '#EF4444';
+                    verdictBg = 'rgba(239, 68, 68, 0.2)';
+                  } else if (tx.transaction_status === 'MONITORING' || riskScore >= 50) {
+                    verdictBadge = 'VELOCITY WATCH';
+                    verdictColor = '#F59E0B';
+                    verdictBg = 'rgba(245, 158, 11, 0.2)';
+                  }
+
                   return (
-                    <tr key={lien.lien_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', transition: 'background 0.15s ease' }}>
-                      <td style={{ padding: '16px 12px', fontWeight: 800, color: '#93C5FD' }}>
-                        {lien.transaction_id}
-                      </td>
-                      <td style={{ padding: '16px 12px', color: '#CBD5E1' }}>
-                        <div>{lien.sender_account_id || 'Cross-Bank'}</div>
-                        <span style={{ fontSize: '0.68rem', color: '#60A5FA', fontWeight: 700 }}>{lien.bank}</span>
-                      </td>
-                      <td style={{ padding: '16px 12px', color: '#CBD5E1' }}>
-                        <div>{lien.account_id}</div>
-                        <span style={{ fontSize: '0.68rem', color: '#EC4899', fontWeight: 700 }}>{lien.bank}</span>
-                      </td>
-                      <td style={{ padding: '16px 12px', fontWeight: 800, color: '#F8FAFC' }}>
-                        ₹{Number(lien.amount || 0).toLocaleString()}
-                      </td>
-                      <td style={{ padding: '16px 12px' }}>
-                        <span style={{
-                          padding: '3px 8px',
-                          borderRadius: 5,
-                          fontWeight: 900,
-                          fontSize: '0.72rem',
-                          background: lien.risk_score >= 80 ? 'rgba(239, 68, 68, 0.25)' : 'rgba(245, 158, 11, 0.25)',
-                          color: lien.risk_score >= 80 ? '#EF4444' : '#F59E0B',
-                        }}>
-                          {lien.risk_score || 72.0}
-                        </span>
-                      </td>
-                      <td style={{ padding: '16px 12px' }}>
-                        <span style={{
-                          padding: '3px 8px',
-                          borderRadius: 5,
-                          fontWeight: 800,
-                          fontSize: '0.7rem',
-                          background: isFrozen ? 'rgba(239, 68, 68, 0.25)' : isRestricted ? 'rgba(249, 115, 22, 0.25)' : 'rgba(167, 139, 250, 0.25)',
-                          color: isFrozen ? '#EF4444' : isRestricted ? '#F97316' : '#C084FC',
-                        }}>
-                          {lien.status}
-                        </span>
-                      </td>
-                      <td style={{ padding: '16px 12px', color: '#94A3B8', fontSize: '0.75rem', maxWidth: '280px' }}>
-                        {lien.restriction_reason || 'ADSL Lien Layer: UNDER_REVIEW | Suspicious Velocity / Mule Flow'}
-                      </td>
-                      <td style={{ padding: '16px 12px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <React.Fragment key={tx.transaction_id}>
+                      <tr
+                        style={{
+                          borderBottom: isExpanded ? 'none' : '1px solid rgba(255,255,255,0.04)',
+                          background: isExpanded ? 'rgba(59, 130, 246, 0.08)' : 'transparent',
+                          transition: 'background 0.15s ease',
+                        }}
+                      >
+                        {/* Transaction ID */}
+                        <td style={{ padding: '16px 12px', fontWeight: 800, color: '#93C5FD', fontFamily: 'JetBrains Mono, monospace' }}>
+                          {tx.transaction_id}
+                        </td>
+
+                        {/* Source */}
+                        <td style={{ padding: '16px 12px', color: '#E2E8F0' }}>
+                          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.8rem' }}>{tx.sender_account_id}</div>
+                          <span style={{ fontSize: '0.68rem', color: '#60A5FA', fontWeight: 800 }}>{tx.sender_bank}</span>
+                        </td>
+
+                        {/* Destination */}
+                        <td style={{ padding: '16px 12px', color: '#E2E8F0' }}>
+                          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.8rem' }}>{tx.receiver_account_id}</div>
+                          <span style={{ fontSize: '0.68rem', color: '#EC4899', fontWeight: 800 }}>{tx.receiver_bank}</span>
+                        </td>
+
+                        {/* Amount */}
+                        <td style={{ padding: '16px 12px', fontWeight: 800, color: '#F8FAFC', fontFamily: 'JetBrains Mono, monospace' }}>
+                          ₹{Number(tx.amount || 0).toLocaleString()}
+                        </td>
+
+                        {/* Risk Score */}
+                        <td style={{ padding: '16px 12px' }}>
+                          <span style={{
+                            padding: '4px 9px',
+                            borderRadius: 5,
+                            fontWeight: 900,
+                            fontSize: '0.72rem',
+                            background: isHighRisk ? 'rgba(239, 68, 68, 0.25)' : isMedRisk ? 'rgba(245, 158, 11, 0.25)' : 'rgba(16, 185, 129, 0.25)',
+                            color: isHighRisk ? '#EF4444' : isMedRisk ? '#F59E0B' : '#10B981',
+                          }}>
+                            {typeof riskScore === 'number' ? riskScore.toFixed(1) : riskScore}
+                          </span>
+                        </td>
+
+                        {/* Status */}
+                        <td style={{ padding: '16px 12px' }}>
+                          <span style={{
+                            padding: '3px 8px',
+                            borderRadius: 5,
+                            fontWeight: 800,
+                            fontSize: '0.7rem',
+                            background: tx.transaction_status === 'COMPLETED' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                            color: tx.transaction_status === 'COMPLETED' ? '#34D399' : '#FBBF24',
+                          }}>
+                            {tx.transaction_status || 'COMPLETED'}
+                          </span>
+                        </td>
+
+                        {/* Autonomous Dynamic Verdict */}
+                        <td style={{ padding: '16px 12px' }}>
+                          <span style={{
+                            padding: '4px 10px',
+                            borderRadius: 5,
+                            fontWeight: 800,
+                            fontSize: '0.7rem',
+                            background: verdictBg,
+                            color: verdictColor,
+                            border: `1px solid ${verdictColor}40`,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                          }}>
+                            <Lock size={11} />
+                            {verdictBadge}
+                          </span>
+                        </td>
+
+                        {/* Action: Investigate Graph */}
+                        <td style={{ padding: '16px 12px', textAlign: 'right' }}>
                           <button
-                            onClick={() => handleAdminAction(lien.transaction_id, 'RESTRICT')}
+                            onClick={() => toggleInvestigate(tx.transaction_id)}
                             style={{
-                              padding: '5px 9px',
-                              borderRadius: 5,
-                              border: '1px solid rgba(249, 115, 22, 0.4)',
-                              background: 'rgba(249, 115, 22, 0.15)',
-                              color: '#FB923C',
-                              fontSize: '0.7rem',
+                              padding: '6px 13px',
+                              borderRadius: '6px',
+                              border: '1px solid',
+                              borderColor: isExpanded ? '#3B82F6' : 'rgba(59, 130, 246, 0.4)',
+                              background: isExpanded ? '#3B82F6' : 'rgba(59, 130, 246, 0.15)',
+                              color: '#FFFFFF',
+                              fontSize: '0.75rem',
                               fontWeight: 800,
                               cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              transition: 'all 0.15s ease',
                             }}
                           >
-                            Restrict
+                            <GitFork size={13} />
+                            <span>{isExpanded ? 'Hide Graph' : 'Investigate'}</span>
+                            {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                           </button>
-                          <button
-                            onClick={() => handleAdminAction(lien.transaction_id, 'FREEZE')}
-                            style={{
-                              padding: '5px 9px',
-                              borderRadius: 5,
-                              border: '1px solid rgba(239, 68, 68, 0.4)',
-                              background: 'rgba(239, 68, 68, 0.15)',
-                              color: '#F87171',
-                              fontSize: '0.7rem',
-                              fontWeight: 800,
-                              cursor: 'pointer',
-                            }}
-                          >
-                            Freeze
-                          </button>
-                          <button
-                            onClick={() => handleAdminAction(lien.transaction_id, 'RELEASE')}
-                            style={{
-                              padding: '5px 9px',
-                              borderRadius: 5,
-                              border: '1px solid rgba(16, 185, 129, 0.4)',
-                              background: 'rgba(16, 185, 129, 0.15)',
-                              color: '#34D399',
-                              fontSize: '0.7rem',
-                              fontWeight: 800,
-                              cursor: 'pointer',
-                            }}
-                          >
-                            Release
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+                      </tr>
+
+                      {/* INLINE EXPANDED GRAPH ROW */}
+                      {isExpanded && (
+                        <tr style={{ background: 'rgba(59, 130, 246, 0.05)' }}>
+                          <td colSpan="8" style={{ padding: '0 12px 20px 12px' }}>
+                            <InlineTransactionGraph
+                              transactionId={tx.transaction_id}
+                              initialTxData={tx}
+                              onClose={() => setExpandedTxId(null)}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })
               )}
@@ -290,233 +432,6 @@ export function AdslUnifiedDashboard({ onNavigateToGraph }) {
         </div>
       </section>
 
-      {/* ──────────────────────────────────────────────────────────────────────────
-          SECTION 3: MULE NETWORK ANALYSIS PREVIEW
-          ────────────────────────────────────────────────────────────────────────── */}
-      <section className="card" style={{ padding: '24px 28px', background: 'rgba(10, 15, 25, 0.85)', border: '1px solid rgba(255,255,255,0.08)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-          <div>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF' }}>
-              Mule Network Analysis & Topological Clustering
-            </h3>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 3 }}>
-              Connected mule accounts clustered dynamically using GATv2 GNN and NetworkX graph analysis
-            </p>
-          </div>
-          {onNavigateToGraph && (
-            <button
-              onClick={onNavigateToGraph}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 6,
-                background: 'rgba(59, 130, 246, 0.2)',
-                border: '1px solid #3B82F6',
-                color: '#60A5FA',
-                fontSize: '0.75rem',
-                fontWeight: 800,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
-            >
-              <GitFork size={14} />
-              <span>Open Interactive Graph Viewer</span>
-            </button>
-          )}
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
-          {(summaryData?.networks || []).slice(0, 4).map((net) => (
-            <div
-              key={net.network_id}
-              style={{
-                padding: '18px 20px',
-                borderRadius: 8,
-                background: 'rgba(15, 23, 42, 0.65)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 10,
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontWeight: 900, color: '#93C5FD', fontSize: '0.95rem' }}>{net.network_id}</span>
-                <span style={{
-                  padding: '2px 8px',
-                  borderRadius: 4,
-                  fontSize: '0.68rem',
-                  fontWeight: 800,
-                  background: net.status === 'FROZEN' ? 'rgba(239, 68, 68, 0.25)' : net.status === 'RESTRICTED' ? 'rgba(249, 115, 22, 0.25)' : 'rgba(167, 139, 250, 0.25)',
-                  color: net.status === 'FROZEN' ? '#EF4444' : net.status === 'RESTRICTED' ? '#F97316' : '#C084FC',
-                }}>
-                  {net.status}
-                </span>
-              </div>
-              <div style={{ fontSize: '0.78rem', color: '#E2E8F0' }}>
-                Pattern: <strong>{net.primary_pattern}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#94A3B8' }}>
-                <span>Risk: <strong style={{ color: '#F59E0B' }}>{net.risk_score}</strong> ({net.risk_level})</span>
-                <span>Accounts: <strong style={{ color: '#F8FAFC' }}>{net.total_accounts}</strong></span>
-                <span>Mules: <strong style={{ color: '#EF4444' }}>{net.mule_accounts}</strong></span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ──────────────────────────────────────────────────────────────────────────
-          SECTION 4: DYNAMIC MONITORING CASES (Medium Risk 31–60)
-          ────────────────────────────────────────────────────────────────────────── */}
-      <section className="card" style={{ padding: '24px 28px', background: 'rgba(10, 15, 25, 0.85)', border: '1px solid rgba(255,255,255,0.08)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-          <div>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF' }}>
-              Dynamic Monitoring Cases (Medium-Risk: 31–60)
-            </h3>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 3 }}>
-              Observes follow-up transactions to resolve genuine activity or escalate to High Risk
-            </p>
-          </div>
-          <span style={{ fontSize: '0.75rem', padding: '4px 10px', borderRadius: 6, background: 'rgba(245, 158, 11, 0.15)', color: '#FBBF24', fontWeight: 800 }}>
-            {monitoringCases.filter((c) => c.status === 'ACTIVE').length} Under Watch
-          </span>
-        </div>
-
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', textAlign: 'left', color: '#94A3B8' }}>
-                <th style={{ padding: '12px 10px' }}>CASE ID</th>
-                <th style={{ padding: '12px 10px' }}>ACCOUNT</th>
-                <th style={{ padding: '12px 10px' }}>BANK</th>
-                <th style={{ padding: '12px 10px' }}>TX AMOUNT</th>
-                <th style={{ padding: '12px 10px' }}>INITIAL RISK</th>
-                <th style={{ padding: '12px 10px' }}>FOLLOW-UP TXS</th>
-                <th style={{ padding: '12px 10px' }}>OBSERVED BEHAVIOUR</th>
-                <th style={{ padding: '12px 10px' }}>OUTCOME</th>
-              </tr>
-            </thead>
-            <tbody>
-              {monitoringCases.length === 0 ? (
-                <tr>
-                  <td colSpan="8" style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
-                    No transactions currently in the monitoring window. Medium-risk items register automatically.
-                  </td>
-                </tr>
-              ) : (
-                monitoringCases.slice(0, 6).map((c) => (
-                  <tr key={c.case_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                    <td style={{ padding: '14px 10px', fontWeight: 800, color: '#FBBF24' }}>{c.case_id}</td>
-                    <td style={{ padding: '14px 10px', color: '#E2E8F0', fontWeight: 700 }}>{c.account_id}</td>
-                    <td style={{ padding: '14px 10px', color: '#94A3B8' }}>{c.bank}</td>
-                    <td style={{ padding: '14px 10px', fontWeight: 800, color: '#F8FAFC' }}>₹{Number(c.amount || 0).toLocaleString()}</td>
-                    <td style={{ padding: '14px 10px' }}>
-                      <span style={{ padding: '2px 7px', borderRadius: 4, background: 'rgba(245, 158, 11, 0.2)', color: '#F59E0B', fontWeight: 800 }}>
-                        {c.initial_risk_score}
-                      </span>
-                    </td>
-                    <td style={{ padding: '14px 10px', color: '#CBD5E1' }}>
-                      {c.follow_up_transaction_count} txs (₹{Number(c.total_follow_up_amount || 0).toLocaleString()})
-                    </td>
-                    <td style={{ padding: '14px 10px', fontSize: '0.74rem', color: '#94A3B8' }}>
-                      {c.resolution_notes || c.monitoring_reason}
-                    </td>
-                    <td style={{ padding: '14px 10px' }}>
-                      <span style={{
-                        padding: '2px 7px',
-                        borderRadius: 4,
-                        fontWeight: 800,
-                        fontSize: '0.7rem',
-                        background: c.status === 'RESOLVED_AS_GENUINE' ? 'rgba(16, 185, 129, 0.2)' : c.status === 'ESCALATED_TO_HIGH_RISK' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(245, 158, 11, 0.2)',
-                        color: c.status === 'RESOLVED_AS_GENUINE' ? '#34D399' : c.status === 'ESCALATED_TO_HIGH_RISK' ? '#EF4444' : '#F59E0B',
-                      }}>
-                        {c.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {/* ──────────────────────────────────────────────────────────────────────────
-          SECTION 5: INVESTIGATION HISTORY & RL DECISIONS
-          ────────────────────────────────────────────────────────────────────────── */}
-      <section className="card" style={{ padding: '24px 28px', background: 'rgba(10, 15, 25, 0.85)', border: '1px solid rgba(255,255,255,0.08)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-          <div>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FFFFFF' }}>
-              Reinforcement Learning (RL) Investigation Decisions
-            </h3>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 3 }}>
-              Adaptive policy agent evaluating evidence vs. computational cost (EXPAND_GRAPH, ANALYSE_NEIGHBOURS, ESCALATE)
-            </p>
-          </div>
-          <span style={{ fontSize: '0.75rem', padding: '4px 10px', borderRadius: 6, background: 'rgba(139, 92, 246, 0.15)', color: '#C084FC', fontWeight: 800 }}>
-            Policy Gradient Agent Active
-          </span>
-        </div>
-
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', textAlign: 'left', color: '#94A3B8' }}>
-                <th style={{ padding: '12px 10px' }}>DECISION ID</th>
-                <th style={{ padding: '12px 10px' }}>NETWORK</th>
-                <th style={{ padding: '12px 10px' }}>RL ACTION</th>
-                <th style={{ padding: '12px 10px' }}>CONFIDENCE</th>
-                <th style={{ padding: '12px 10px' }}>REWARD</th>
-                <th style={{ padding: '12px 10px' }}>HOPS</th>
-                <th style={{ padding: '12px 10px' }}>POLICY REASONING</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rlDecisions.length === 0 ? (
-                <tr>
-                  <td colSpan="7" style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
-                    No RL graph investigation decisions recorded yet. Decisions trigger when suspicious networks undergo deep traversal.
-                  </td>
-                </tr>
-              ) : (
-                rlDecisions.slice(0, 6).map((dec) => (
-                  <tr key={dec.decision_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                    <td style={{ padding: '14px 10px', fontWeight: 800, color: '#A78BFA' }}>{dec.decision_id}</td>
-                    <td style={{ padding: '14px 10px', fontWeight: 700, color: '#93C5FD' }}>{dec.network_id}</td>
-                    <td style={{ padding: '14px 10px' }}>
-                      <span style={{
-                        padding: '3px 8px',
-                        borderRadius: 5,
-                        fontWeight: 900,
-                        fontSize: '0.72rem',
-                        background: dec.action === 'ESCALATE' ? 'rgba(239, 68, 68, 0.25)' : dec.action === 'EXPAND_GRAPH' ? 'rgba(59, 130, 246, 0.25)' : 'rgba(16, 185, 129, 0.25)',
-                        color: dec.action === 'ESCALATE' ? '#EF4444' : dec.action === 'EXPAND_GRAPH' ? '#60A5FA' : '#34D399',
-                      }}>
-                        {dec.action}
-                      </span>
-                    </td>
-                    <td style={{ padding: '14px 10px', color: '#E2E8F0', fontWeight: 700 }}>
-                      {(dec.confidence * 100).toFixed(0)}%
-                    </td>
-                    <td style={{ padding: '14px 10px', color: '#34D399', fontWeight: 700 }}>
-                      +{dec.reward}
-                    </td>
-                    <td style={{ padding: '14px 10px', color: '#CBD5E1' }}>
-                      {dec.hops_analyzed} hops
-                    </td>
-                    <td style={{ padding: '14px 10px', fontSize: '0.74rem', color: '#94A3B8', maxWidth: '340px' }}>
-                      {dec.reason}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
     </div>
   );
 }

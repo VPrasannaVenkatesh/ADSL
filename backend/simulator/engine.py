@@ -543,6 +543,162 @@ class LiveTransactionSimulator:
                     print(f"[Simulator Worker Error]: {e}")
             time.sleep(self.config.loop_delay)
 
+    def execute_mule_sink_flow(self, total_amount: int = 75000) -> Dict[str, Any]:
+        """
+        Executes an end-to-end Multi-Mule Layered Sink Topology in real time:
+        1. Identifies a Source Account with available funds.
+        2. Selects 3 Intermediate Mule Accounts across banks (SBI, AXIS, IOB).
+        3. Selects 1 distinct Sink/Consolidation Account.
+        4. Stage 1 (Dispersion / Smurfing): Source splits and transfers funds to the 3 mules.
+        5. Stage 2 (Funneling / Sinking): All 3 mules rapidly forward funds (minus small fee) into the Sink Account.
+        6. Processes each transaction through full multi-bank verification, behavioural analysis,
+           XGBoost ML scoring, decentralized coordinator consensus, and network lien layer.
+        """
+        now = datetime.now()
+        self.sim_clock = now
+
+        # 1. Select Source Account (Balance >= total_amount * 0.9)
+        candidate_sources = []
+        for b in BANK_NAMES:
+            candidate_sources.extend([
+                a for a in self.account_mgr.accounts_by_bank[b]
+                if a.get("current_balance", 0) >= int(total_amount * 0.9)
+            ])
+
+        if not candidate_sources:
+            # Fallback to highest balance account across all banks
+            all_accs = [a for b in BANK_NAMES for a in self.account_mgr.accounts_by_bank[b]]
+            all_accs.sort(key=lambda x: x.get("current_balance", 0), reverse=True)
+            source = all_accs[0]
+            total_amount = min(total_amount, int(source["current_balance"] * 0.85))
+        else:
+            source = random.choice(candidate_sources)
+
+        # 2. Select 3 Intermediate Mules (one from each bank where possible)
+        mules = []
+        for b in BANK_NAMES:
+            available = [
+                a for a in self.account_mgr.accounts_by_bank[b]
+                if a["account_id"] != source["account_id"]
+            ]
+            if available:
+                mules.append(random.choice(available))
+
+        # Ensure we have exactly 3 mules
+        while len(mules) < 3:
+            all_avail = [
+                a for b in BANK_NAMES for a in self.account_mgr.accounts_by_bank[b]
+                if a["account_id"] != source["account_id"] and a["account_id"] not in [m["account_id"] for m in mules]
+            ]
+            if not all_avail:
+                break
+            mules.append(random.choice(all_avail))
+
+        # 3. Select 1 distinct Sink Account
+        excluded_ids = {source["account_id"]}.union({m["account_id"] for m in mules})
+        candidate_sinks = [
+            a for b in BANK_NAMES for a in self.account_mgr.accounts_by_bank[b]
+            if a["account_id"] not in excluded_ids
+        ]
+        sink = random.choice(candidate_sinks) if candidate_sinks else mules[0]
+
+        # 4. Generate the flow steps
+        steps = self.patterns.build_mule_sink_steps(
+            source=source,
+            mules=mules,
+            sink=sink,
+            total_amount=total_amount,
+            base_time=now,
+        )
+
+        executed_transactions = []
+        stage_1_results = []
+        stage_2_results = []
+
+        # 5. Execute Stage 1 (Dispersion: Source -> Mules)
+        for step in steps:
+            if step.pattern_type == "MULE_DISPERSION":
+                self.sim_clock = step.scheduled_time
+                sender_acc = self.account_mgr.accounts_by_id.get(f"{step.sender_bank}:{step.sender_account_id}") or source
+                receiver_acc = self.account_mgr.accounts_by_id.get(f"{step.receiver_bank}:{step.receiver_account_id}") or {
+                    "bank": step.receiver_bank, "account_id": step.receiver_account_id, "current_balance": 10000
+                }
+                res = self.processor.execute_transaction(
+                    sender=sender_acc,
+                    receiver=receiver_acc,
+                    amount=step.amount,
+                    tx_type=step.tx_type,
+                    timestamp=step.scheduled_time,
+                    device_ip=step.device_ip,
+                    location=step.location,
+                    recipient_is_new=True,
+                )
+                if res:
+                    self._record_result(res, is_pattern=True, is_business=False)
+                    tx_record = self.recent_transactions[0] if self.recent_transactions else {}
+                    item = {
+                        "stage": "1_DISPERSION",
+                        "transaction_id": res.transaction_id,
+                        "sender": f"{res.sender_bank}:{res.sender_account_id}",
+                        "receiver": f"{res.receiver_bank}:{res.receiver_account_id}",
+                        "amount": res.amount,
+                        "status": res.status,
+                        "xgboost_risk_score": tx_record.get("xgboost_risk_score", 0.0),
+                        "timestamp": res.transaction_timestamp.isoformat(),
+                    }
+                    stage_1_results.append(item)
+                    executed_transactions.append(item)
+
+        # 6. Execute Stage 2 (Consolidation: Mules -> Sink)
+        for step in steps:
+            if step.pattern_type == "MULE_SINK_CONSOLIDATION":
+                self.sim_clock = step.scheduled_time
+                sender_acc = self.account_mgr.accounts_by_id.get(f"{step.sender_bank}:{step.sender_account_id}") or {
+                    "bank": step.sender_bank, "account_id": step.sender_account_id, "current_balance": 50000
+                }
+                receiver_acc = self.account_mgr.accounts_by_id.get(f"{step.receiver_bank}:{step.receiver_account_id}") or sink
+                res = self.processor.execute_transaction(
+                    sender=sender_acc,
+                    receiver=receiver_acc,
+                    amount=step.amount,
+                    tx_type=step.tx_type,
+                    timestamp=step.scheduled_time,
+                    device_ip=step.device_ip,
+                    location=step.location,
+                    recipient_is_new=True,
+                )
+                if res:
+                    self._record_result(res, is_pattern=True, is_business=False)
+                    tx_record = self.recent_transactions[0] if self.recent_transactions else {}
+                    item = {
+                        "stage": "2_SINK_CONSOLIDATION",
+                        "transaction_id": res.transaction_id,
+                        "sender": f"{res.sender_bank}:{res.sender_account_id}",
+                        "receiver": f"{res.receiver_bank}:{res.receiver_account_id}",
+                        "amount": res.amount,
+                        "status": res.status,
+                        "xgboost_risk_score": tx_record.get("xgboost_risk_score", 0.0),
+                        "timestamp": res.transaction_timestamp.isoformat(),
+                    }
+                    stage_2_results.append(item)
+                    executed_transactions.append(item)
+
+        total_dispersed = sum(t["amount"] for t in stage_1_results)
+        total_sunk = sum(t["amount"] for t in stage_2_results)
+
+        return {
+            "flow_name": "MULE_DISPERSION_AND_SINK",
+            "topology": "Source -> [Mule_1, Mule_2, Mule_3] -> Sink Account",
+            "source_account": f"{source['bank']}:{source['account_id']}",
+            "intermediate_mules": [f"{m['bank']}:{m['account_id']}" for m in mules],
+            "sink_account": f"{sink['bank']}:{sink['account_id']}",
+            "total_dispersed": total_dispersed,
+            "total_sunk": total_sunk,
+            "stage_1_dispersion": stage_1_results,
+            "stage_2_sink": stage_2_results,
+            "total_transactions_executed": len(executed_transactions),
+        }
+
     def run_continuous(
         self,
         on_transaction: Optional[Callable[[TransactionResult], None]] = None,

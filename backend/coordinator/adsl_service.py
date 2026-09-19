@@ -16,12 +16,13 @@ Coordinates the end-to-end intelligent transaction pipeline:
 import os
 import requests
 from datetime import datetime
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 
 from network_monitoring.graph_engine import GLOBAL_NETWORK_GRAPH
 from network_monitoring.fund_provenance import trace_fund_provenance
 from network_monitoring.lien_layer import GLOBAL_LIEN_LAYER
 from .mule_network_manager import GLOBAL_MULE_NETWORKS
+import threading
 
 # Configurable Thresholds per Architecture Specification
 ALLOW_THRESHOLD = 30.0
@@ -30,6 +31,35 @@ REVIEW_THRESHOLD = 70.0
 RESTRICT_THRESHOLD = 85.0
 
 BANK_RISK_API_URL = os.environ.get("BANK_RISK_API_URL", "http://localhost:8001")
+
+RECENT_ADSL_TRANSACTIONS: List[Dict[str, Any]] = []
+_adsl_tx_lock = threading.RLock()
+
+
+def get_recent_adsl_transactions(limit: int = 60) -> List[Dict[str, Any]]:
+    """Returns the most recent transactions processed through ADSL."""
+    with _adsl_tx_lock:
+        return list(RECENT_ADSL_TRANSACTIONS[:limit])
+
+
+def _update_bank_tx_status(bank: str, tx_id: str, new_status: str, honeypot_status: str = "NONE", lien_status: str = "NONE"):
+    """Safely updates transactions table across bank databases with status and honeypot/lien flags."""
+    try:
+        from simulator.db_connection import get_all_bank_connections
+        conns = get_all_bank_connections()
+        for b_name, conn in conns.items():
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE transactions SET
+                        transaction_status = %s,
+                        honeypot_status = %s,
+                        lien_status = %s
+                    WHERE transaction_id = %s
+                """, (new_status, honeypot_status, lien_status, tx_id))
+            conn.commit()
+            conn.close()
+    except Exception as e:
+        print(f"[ADSL] Error updating tx status in DB: {e}")
 
 
 def _fetch_account_stored_risk(account_id: str, bank_name: str) -> Dict[str, Any]:
@@ -171,45 +201,7 @@ def process_adsl_transaction(tx_data: Dict[str, Any]) -> Dict[str, Any]:
     device_ip = tx_data.get("device_ip", "Mobile:192.168.1.1")
     location = tx_data.get("location", "Chennai")
 
-    # ── Step 1: Status = PROCESSING ──────────────────────────────────────────
-    status = "PROCESSING"
-
-    # ── Step 2: Request Sender & Receiver Risk from Bank ─────────────────────
-    sender_profile = _fetch_account_stored_risk(sender_id, sender_bank)
-    receiver_profile = _fetch_account_stored_risk(receiver_id, receiver_bank)
-
-    sender_risk_score = float(sender_profile.get("risk_score", 15.0))
-    receiver_risk_score = float(receiver_profile.get("risk_score", 15.0))
-
-    # ── Step 3: XGBoost Transaction Risk Calculation ─────────────────────────
-    xgb_assessment = _compute_transaction_xgboost_risk(tx_data, sender_risk_score, receiver_risk_score)
-    transaction_risk_score = float(xgb_assessment["score"])
-    risk_level = xgb_assessment["level"]
-    risk_reasons = xgb_assessment["reasons"]
-
-    # ── Step 4: Tiered Threshold Processing ──────────────────────────────────
-    # Tier 1: LOW RISK (0 - 30) -> Action = ALLOW -> Status = COMPLETED
-    if transaction_risk_score <= ALLOW_THRESHOLD and sender_risk_score < 70 and receiver_risk_score < 70:
-        return {
-            "transaction_id": tx_id,
-            "status": "COMPLETED",
-            "decision": "ALLOW",
-            "action": "ALLOW",
-            "risk_score": transaction_risk_score,
-            "risk_level": "LOW",
-            "risk_reasons": risk_reasons,
-            "combined_risk_score": transaction_risk_score,
-            "sender_risk_score": sender_risk_score,
-            "receiver_risk_score": receiver_risk_score,
-            "deep_analysis_performed": False,
-            "message": "Low risk — transaction allowed immediately without graph or GNN analysis",
-            "timestamp": datetime.now().isoformat(),
-        }
-
-    # ── Step 5: Suspicious Transaction -> ADSL Deeper Processing ────────────
-    # Exceeds ALLOW_THRESHOLD: Trigger Graph Analysis, Provenance, GNN, Mule Grouping
-    
-    # 5A. Add transaction to Graph
+    # ── Step 1: Add transaction to Graph ─────────────────────────────────────
     graph_dict = {
         "transaction_id": tx_id,
         "sender_account_id": sender_id,
@@ -228,6 +220,78 @@ def process_adsl_transaction(tx_data: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         print(f"[ADSL] Graph edge error: {e}")
 
+    # ── Step 2: Request Sender & Receiver Risk from Bank ─────────────────────
+    sender_profile = _fetch_account_stored_risk(sender_id, sender_bank)
+    receiver_profile = _fetch_account_stored_risk(receiver_id, receiver_bank)
+
+    sender_risk_score = float(sender_profile.get("risk_score", 15.0))
+    receiver_risk_score = float(receiver_profile.get("risk_score", 15.0))
+
+    # ── Step 3: XGBoost Transaction Risk Calculation ─────────────────────────
+    xgb_assessment = _compute_transaction_xgboost_risk(tx_data, sender_risk_score, receiver_risk_score)
+    transaction_risk_score = float(xgb_assessment["score"])
+    risk_level = xgb_assessment["level"]
+    risk_reasons = xgb_assessment["reasons"]
+
+    # ── Step 4: Tiered Threshold Processing ──────────────────────────────────
+    # Tier 1: LOW RISK (0 - 30) -> Action = ALLOW -> Status = COMPLETED
+    if transaction_risk_score <= ALLOW_THRESHOLD and sender_risk_score < 70 and receiver_risk_score < 70:
+        try:
+            GLOBAL_NETWORK_GRAPH.update_transaction_status(tx_id, "COMPLETED")
+        except Exception:
+            pass
+
+        # Check if sender has an active monitoring case — genuine subsequent activity resolves monitoring case!
+        try:
+            from coordinator.monitoring_manager import GLOBAL_MONITORING_MANAGER
+            GLOBAL_MONITORING_MANAGER.record_subsequent_activity(
+                account_id=sender_id,
+                new_tx_id=tx_id,
+                new_amount=amount,
+                is_rapid_forward=False,
+                is_suspicious_counterparty=False,
+                is_genuine_flow=True,
+                new_risk_score=transaction_risk_score,
+            )
+        except Exception as e:
+            print(f"[ADSL] Monitoring follow-up error: {e}")
+
+        # Update bank DB status
+        _update_bank_tx_status(sender_bank, tx_id, "COMPLETED", "NONE", "NONE")
+
+        result_low = {
+            "transaction_id": tx_id,
+            "sender_account_id": sender_id,
+            "sender_bank": sender_bank,
+            "receiver_account_id": receiver_id,
+            "receiver_bank": receiver_bank,
+            "amount": amount,
+            "transaction_type": tx_type,
+            "status": "COMPLETED",
+            "decision": "ALLOW",
+            "action": "ALLOW",
+            "risk_score": transaction_risk_score,
+            "risk_level": "LOW",
+            "risk_reasons": risk_reasons,
+            "combined_risk_score": transaction_risk_score,
+            "sender_risk_score": sender_risk_score,
+            "receiver_risk_score": receiver_risk_score,
+            "deep_analysis_performed": False,
+            "graph_updated": True,
+            "message": "Low risk (0-30) — transaction allowed immediately as COMPLETED",
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        with _adsl_tx_lock:
+            RECENT_ADSL_TRANSACTIONS.insert(0, result_low)
+            if len(RECENT_ADSL_TRANSACTIONS) > 200:
+                RECENT_ADSL_TRANSACTIONS.pop()
+
+        return result_low
+
+    # ── Step 5: Suspicious Transaction -> ADSL Deeper Processing ────────────
+    # Exceeds ALLOW_THRESHOLD: Trigger Graph Analysis, Provenance, GNN, Mule Grouping
+    
     # 5B. Fund Provenance Analysis
     provenance_result = {}
     try:
@@ -257,7 +321,6 @@ def process_adsl_transaction(tx_data: Dict[str, Any]) -> Dict[str, Any]:
         print(f"[ADSL] GNN live prediction error: {e}")
 
     # 5D. Mule Network Dynamic Tracking
-    # Mule networks are registered and tracked only when GNN/GAT identifies mule patterns or risk exceeds review threshold
     network_info = None
     gnn_tracked_mule = False
     if gnn_result and "node_classifications" in gnn_result:
@@ -266,59 +329,66 @@ def process_adsl_transaction(tx_data: Dict[str, Any]) -> Dict[str, Any]:
                 gnn_tracked_mule = True
                 break
 
-    if gnn_tracked_mule or gnn_mule_prob >= 0.35 or transaction_risk_score >= REVIEW_THRESHOLD:
+    if gnn_tracked_mule or gnn_mule_prob >= 0.35 or transaction_risk_score > 60.0:
         try:
             network_info = GLOBAL_MULE_NETWORKS.register_or_update_network(
                 trigger_tx_id=tx_id,
                 sender_id=sender_id,
                 receiver_id=receiver_id,
                 gnn_result=gnn_result,
-                pattern_type="GNN_DETECTED_MULE" if gnn_tracked_mule else ("SUSPICIOUS_FLOW" if transaction_risk_score >= 70 else "MONITORED_FLOW"),
+                pattern_type="GNN_DETECTED_MULE" if gnn_tracked_mule else "MULE_SUSPICIOUS_FLOW",
                 risk_score=max(transaction_risk_score, round(gnn_mule_prob * 100, 1)),
             )
         except Exception as e:
             print(f"[ADSL] Mule grouping error: {e}")
 
-    # 5E. Final Decision & Status Assignment per Architecture Specs (Sections 11, 12, 18)
-    final_status = "MONITORING"
-    final_decision = "MONITOR"
+    # 5E. Final Decision & Status Assignment (Sections 13, 14, 15, 16)
+    # LOW: <= 30.0 -> ALLOW -> COMPLETED
+    # MEDIUM: 30.1 - 60.0 -> MONITOR -> MONITORING
+    # HIGH: > 60.0 -> HONEYPOT + LIEN APPLIED -> ADSL Analysis
     lien_receipt = None
 
-    if transaction_risk_score >= 90.0:
-        final_status = "FROZEN"
-        final_decision = "FREEZE"
-    elif transaction_risk_score >= RESTRICT_THRESHOLD:
-        final_status = "RESTRICTED"
-        final_decision = "RESTRICT"
-    elif transaction_risk_score >= 60.0 or gnn_tracked_mule or gnn_mule_prob >= 0.35:
-        # High Risk (>60 or GNN mule anomaly) -> UNDER_REVIEW -> Apply Lien hold
-        final_status = "UNDER_REVIEW"
-        final_decision = "CONTROLLED_ACTION"
-    elif transaction_risk_score > ALLOW_THRESHOLD:
-        final_status = "MONITORING"
-        final_decision = "MONITOR"
-    else:
-        final_status = "COMPLETED"
-        final_decision = "ALLOW"
+    if transaction_risk_score > 60.0 or gnn_tracked_mule or gnn_mule_prob >= 0.40:
+        final_status = "HONEYPOT"
+        final_decision = "HONEYPOT"
+        h_status = "HONEYPOT"
+        l_status = "LIEN_APPLIED"
 
-    # For Under Review, Restricted, or Frozen: place lien to control funds and stop downstream flow
-    if final_status in ("UNDER_REVIEW", "RESTRICTED", "FROZEN"):
+        # Apply protective lien on recipient account
         try:
-            lien_type = "FREEZE" if final_status == "FROZEN" else ("RESTRICTION" if final_status == "RESTRICTED" else "LIEN")
             lien_receipt = GLOBAL_LIEN_LAYER.place_lien(
                 transaction_id=tx_id,
                 account_id=receiver_id,
                 bank=receiver_bank,
                 amount=amount,
-                reason=f"ADSL Lien Layer: {final_status} | GNN Mule Prob {gnn_mule_prob:.2f} | XGBoost Risk {transaction_risk_score}",
-                lien_type=lien_type,
+                reason=f"ADSL Honeypot + Lien: High risk score ({transaction_risk_score:.1f}) | GNN Mule Prob {gnn_mule_prob:.2f}",
+                lien_type="LIEN",
                 risk_score=max(transaction_risk_score, round(gnn_mule_prob * 100, 1)),
             )
         except Exception as e:
             print(f"[ADSL] Automated Lien placement error: {e}")
 
-    # Register in Dynamic Monitoring Manager if under monitoring (31-60 score)
-    if final_status == "MONITORING":
+        # If sender was under monitoring, escalate!
+        try:
+            from coordinator.monitoring_manager import GLOBAL_MONITORING_MANAGER
+            GLOBAL_MONITORING_MANAGER.record_subsequent_activity(
+                account_id=sender_id,
+                new_tx_id=tx_id,
+                new_amount=amount,
+                is_rapid_forward=True,
+                is_suspicious_counterparty=True,
+                new_risk_score=transaction_risk_score,
+            )
+        except Exception:
+            pass
+
+    elif transaction_risk_score > ALLOW_THRESHOLD:
+        final_status = "MONITORING"
+        final_decision = "MONITOR"
+        h_status = "NONE"
+        l_status = "NONE"
+
+        # Register in Dynamic Monitoring Manager for observation of subsequent behaviour
         try:
             from coordinator.monitoring_manager import GLOBAL_MONITORING_MANAGER
             GLOBAL_MONITORING_MANAGER.register_case(
@@ -328,10 +398,19 @@ def process_adsl_transaction(tx_data: Dict[str, Any]) -> Dict[str, Any]:
                 bank=sender_bank,
                 amount=amount,
                 risk_score=transaction_risk_score,
-                reason="Medium-risk score (31-60) or velocity/timing anomaly requiring dynamic monitoring",
+                reason="Medium-risk score (31-60) requiring behavioural monitoring",
             )
         except Exception as e:
             print(f"[ADSL] Monitoring registration error: {e}")
+
+    else:
+        final_status = "COMPLETED"
+        final_decision = "ALLOW"
+        h_status = "NONE"
+        l_status = "NONE"
+
+    # Update status in bank DB transactions table
+    _update_bank_tx_status(sender_bank, tx_id, final_status, h_status, l_status)
 
     # 5F. RL Investigation Agent (Decides whether to expand graph, analyze neighbours, or escalate)
     rl_decision = None
@@ -359,8 +438,14 @@ def process_adsl_transaction(tx_data: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         print(f"[ADSL] Graph status error: {e}")
 
-    return {
+    res_dict = {
         "transaction_id": tx_id,
+        "sender_account_id": sender_id,
+        "sender_bank": sender_bank,
+        "receiver_account_id": receiver_id,
+        "receiver_bank": receiver_bank,
+        "amount": amount,
+        "transaction_type": tx_type,
         "status": final_status,
         "decision": final_decision,
         "action": final_decision,
@@ -383,6 +468,14 @@ def process_adsl_transaction(tx_data: Dict[str, Any]) -> Dict[str, Any]:
         "rl_decision": rl_decision,
         "timestamp": datetime.now().isoformat(),
     }
+
+    with _adsl_tx_lock:
+        RECENT_ADSL_TRANSACTIONS.insert(0, res_dict)
+        if len(RECENT_ADSL_TRANSACTIONS) > 200:
+            RECENT_ADSL_TRANSACTIONS.pop()
+
+    return res_dict
+
 
 
 def execute_adsl_admin_action(

@@ -114,7 +114,8 @@ class NetworkPatternGenerator:
             "FAN_OUT",
             "RAPID_FORWARDING",
             "DIAMOND_SPLIT_MERGE",
-            "CIRCULAR_FLOW"
+            "CIRCULAR_FLOW",
+            "MULE_DISPERSION_AND_SINK",
         ])
 
         all_accs = [a for a in cluster["all"] if a["current_balance"] >= 2000]
@@ -133,6 +134,8 @@ class NetworkPatternGenerator:
             self._schedule_diamond_pattern(cluster, base_time)
         elif pattern_choice == "CIRCULAR_FLOW":
             self._schedule_circular_flow(cluster, base_time)
+        elif pattern_choice == "MULE_DISPERSION_AND_SINK":
+            self._schedule_mule_sink_flow(cluster, base_time)
 
     def _schedule_multi_hop_chain(self, cluster: dict, base_time: datetime):
         """
@@ -279,6 +282,76 @@ class NetworkPatternGenerator:
         self.pending_queue.append(self._create_step(node_a, node_b, amount, t1, "CIRCULAR_FLOW", seq_id))
         self.pending_queue.append(self._create_step(node_b, node_c, int(amount * 0.95), t2, "CIRCULAR_FLOW", seq_id))
         self.pending_queue.append(self._create_step(node_c, node_a, int(amount * 0.90), t3, "CIRCULAR_FLOW", seq_id))
+
+    def _schedule_mule_sink_flow(self, cluster: dict, base_time: datetime):
+        """
+        Mule Dispersion & Sink Flow:
+        1. Source Account splits and transfers funds to 3 intermediate mule accounts (Fan-Out).
+        2. All 3 intermediate mule accounts rapidly forward the funds to a single Sink Account (Fan-In / Sinking).
+        """
+        all_accs = [a for a in cluster["all"] if a["current_balance"] >= 12000]
+        if len(all_accs) < 5:
+            # Fallback to general account manager if cluster has insufficient balance
+            all_accs = [a for bank in BANK_NAMES for a in self.account_mgr.accounts_by_bank[bank] if a["current_balance"] >= 15000]
+            if len(all_accs) < 5:
+                return
+
+        source = random.choice(all_accs)
+        remaining = [a for a in all_accs if a["account_id"] != source["account_id"]]
+        if len(remaining) < 4:
+            return
+
+        # Pick 3 intermediate mules and 1 distinct sink account
+        mules = remaining[:3]
+        sink = remaining[3]
+
+        total_amount = min(int(source["current_balance"] * 0.85), random.randint(30000, 90000))
+        steps = self.build_mule_sink_steps(source, mules, sink, total_amount, base_time)
+        self.pending_queue.extend(steps)
+
+    def build_mule_sink_steps(
+        self,
+        source: dict,
+        mules: List[dict],
+        sink: dict,
+        total_amount: int,
+        base_time: datetime,
+    ) -> List[PendingStep]:
+        """
+        Builds explicit PendingStep sequence for:
+        Source -> [Mule_1, Mule_2, Mule_3] -> Sink Account
+        """
+        steps: List[PendingStep] = []
+        seq_id = f"SEQ_MULE_SINK_{uuid.uuid4().hex[:8]}"
+        split_amount = total_amount // len(mules)
+
+        # Stage 1: Dispersion to multiple mules (Fan-Out)
+        for i, mule in enumerate(mules):
+            t_disp = base_time + timedelta(seconds=i * random.randint(3, 10) + 1)
+            steps.append(self._create_step(
+                sender=source,
+                receiver=mule,
+                amount=split_amount,
+                sched_time=t_disp,
+                pattern_name="MULE_DISPERSION",
+                sequence_id=seq_id,
+            ))
+
+        # Stage 2: Sinking from multiple mules into single Sink Account (Fan-In / Consolidation)
+        for i, mule in enumerate(mules):
+            # Rapid forwarding after receiving (short dwell time 10-30s)
+            forward_amt = int(split_amount * random.uniform(0.92, 0.96))  # small mule cut retained
+            t_sink = base_time + timedelta(seconds=(len(mules) * 10) + (i * random.randint(5, 15)) + 15)
+            steps.append(self._create_step(
+                sender=mule,
+                receiver=sink,
+                amount=forward_amt,
+                sched_time=t_sink,
+                pattern_name="MULE_SINK_CONSOLIDATION",
+                sequence_id=seq_id,
+            ))
+
+        return steps
 
     def _create_step(self, sender: dict, receiver: dict, amount: int, sched_time: datetime, pattern_name: str, sequence_id: str = "") -> PendingStep:
         tx_type = random.choice(["UPI", "IMPS", "NEFT"])

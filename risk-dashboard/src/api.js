@@ -43,6 +43,7 @@ export const riskApi = {
     const q = new URLSearchParams();
     if (params.bank && params.bank !== 'ALL') q.set('bank', params.bank);
     if (params.risk_level) q.set('risk_level', params.risk_level);
+    if (params.status_filter) q.set('status_filter', params.status_filter);
     if (params.flagged_only) q.set('flagged_only', 'true');
     q.set('limit', params.limit || 60);
     q.set('offset', params.offset || 0);

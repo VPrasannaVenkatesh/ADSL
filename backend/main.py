@@ -220,6 +220,18 @@ def set_simulator_mix(req: MixRequest):
     return sim.set_simulation_mix(mix)
 
 
+@app.post("/api/simulator/patterns/mule-sink")
+def trigger_mule_sink_endpoint(req: Optional[dict] = None):
+    """
+    Triggers an end-to-end multi-mule dispersion and sink flow:
+    Source -> [Multiple Intermediate Mules] -> Sink Account.
+    """
+    sim = get_or_init_simulator()
+    total_amount = int((req or {}).get("total_amount", 75000))
+    result = sim.execute_mule_sink_flow(total_amount=total_amount)
+    return result
+
+
 # Live & Historical Transaction Endpoints
 
 @app.get("/api/transactions/live")
@@ -600,6 +612,67 @@ def get_account_profile(bank: str, account_id: str):
         conn.close()
 
 
+@app.get("/api/accounts/{bank}/{account_id}/report")
+def get_account_report_endpoint(bank: str, account_id: str):
+    """Generates official downloadable text and JSON audit dossier for an account."""
+    b = bank.upper()
+    if b not in BANK_NAMES:
+        raise HTTPException(status_code=400, detail="Invalid bank")
+
+    profile_data = get_account_profile(bank, account_id)
+    acc = profile_data["account"]
+    summary = profile_data["transaction_summary"]
+    txns = profile_data["recent_transactions"]
+
+    gen_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S IST")
+    report_lines = [
+        "=" * 74,
+        f"   {b} COMMERCIAL BANKING SYSTEM — OFFICIAL ACCOUNT AUDIT DOSSIER",
+        "=" * 74,
+        f"  Generated Timestamp  : {gen_time}",
+        f"  Account ID           : {acc['account_id']}",
+        f"  Bank / Core System   : {b} (Database: {b.lower()}_db)",
+        f"  Customer Legal Name  : {acc['customer_name']}",
+        f"  Core Account Number  : {acc['account_number']}",
+        f"  Account Classification: {acc['account_type']} ({acc.get('business_category') or 'Standard'})",
+        f"  Operational Status   : {acc['account_status']}",
+        f"  Current Ledger Balance: ₹{acc['current_balance']:,}",
+        f"  Registered Location  : {acc['home_location']}",
+        "-" * 74,
+        " [1] TRANSACTION ACTIVITY SUMMARY",
+        f"  * Total Logged Txns  : {summary['transaction_count']}",
+        f"  * Total Outflow / Sent: ₹{summary['total_sent']:,}",
+        f"  * Total Inflow / Recv: ₹{summary['total_received']:,}",
+        "-" * 74,
+        " [2] RECENT LEDGER TRANSACTION HISTORY",
+        f"  {'TX ID':<16} {'DIRECTION':<9} {'COUNTERPARTY':<16} {'AMOUNT (INR)':<14} {'STATUS'}",
+        "  " + "-" * 70,
+    ]
+
+    for t in txns:
+        direction = "DEBIT" if t["is_outgoing"] else "CREDIT"
+        counterparty = t["receiver_account_id"] if t["is_outgoing"] else t["sender_account_id"]
+        report_lines.append(
+            f"  {t['transaction_id']:<16} {direction:<9} {counterparty:<16} ₹{t['amount']:<13,} {t['transaction_status']}"
+        )
+
+    report_lines.extend([
+        "=" * 74,
+        "  END OF CORE BANKING LEDGER AUDIT REPORT",
+        f"  Verified by {b} Internal Audit Engine",
+        "=" * 74,
+    ])
+
+    return {
+        "account_id": account_id,
+        "bank": b,
+        "generated_at": gen_time,
+        "profile": profile_data,
+        "report_text": "\n".join(report_lines),
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+

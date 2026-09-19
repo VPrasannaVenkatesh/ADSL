@@ -2,7 +2,11 @@
 Storage module for XGBoost & Unified Transaction Risk Assessments.
 Uses direct psycopg2 queries to store and fetch records from
 transaction_risk_assessments in sbi_db, axis_db, and iob_db.
-Stores all 18 complete audit attributes.
+Stores all Section 17 audit attributes including:
+- transaction_id, sender, receiver, banks, amount, timestamp,
+- transaction_type, device, location, account_type,
+- numerical xgboost_risk_score, risk_level, current_status,
+- honeypot_status, lien_status, risk_factors.
 """
 
 import json
@@ -36,11 +40,17 @@ def save_transaction_risk_assessment(
     network_risk: float = 0.0,
     final_decision: Optional[str] = None,
     transaction_status: Optional[str] = None,
+    transaction_type: Optional[str] = None,
+    device_ip: Optional[str] = None,
+    location: Optional[str] = None,
+    account_type: Optional[str] = None,
+    honeypot_status: Optional[str] = None,
+    lien_status: Optional[str] = None,
 ) -> str:
     """
-    Inserts a comprehensive transaction_risk_assessments record into the bank's PostgreSQL database.
-    Stores all 18 required assessment & lifecycle attributes.
-    Returns the generated assessment_id.
+    Inserts or updates a comprehensive transaction_risk_assessments record into the bank's PostgreSQL database.
+    Stores all numerical scores and Section 17 required attributes.
+    Returns the assessment_id.
     """
     assessment_id = f"XGB_{uuid.uuid4().hex[:12].upper()}"
     factors_json = json.dumps(top_risk_factors or [])
@@ -50,7 +60,23 @@ def save_transaction_risk_assessment(
     s_bank = sender_bank or bank
     r_bank = receiver_bank or bank
     f_decision = final_decision or decision_status
-    t_status = transaction_status or ("RESTRICTED" if flagged else "COMPLETED")
+    
+    # Map default status based on risk level
+    if transaction_status:
+        t_status = transaction_status
+    elif risk_level == "HIGH" or flagged:
+        t_status = "HONEYPOT"
+    elif risk_level == "MEDIUM":
+        t_status = "MONITORING"
+    else:
+        t_status = "COMPLETED"
+
+    h_status = honeypot_status or ("HONEYPOT" if (risk_level == "HIGH" or flagged) else "NONE")
+    l_status = lien_status or ("LIEN_APPLIED" if (risk_level == "HIGH" or flagged) else "NONE")
+    t_type = transaction_type or "UPI"
+    dev = device_ip or "Mobile:192.168.1.1"
+    loc = location or "Chennai"
+    acc_t = account_type or "PERSONAL"
 
     with conn.cursor() as cur:
         # Idempotency Protection: Check if this transaction has already been assessed
@@ -65,10 +91,12 @@ def save_transaction_risk_assessment(
                 UPDATE transaction_risk_assessments SET
                     final_decision = COALESCE(%s, final_decision),
                     transaction_status = COALESCE(%s, transaction_status),
+                    honeypot_status = COALESCE(%s, honeypot_status),
+                    lien_status = COALESCE(%s, lien_status),
                     network_risk = GREATEST(network_risk, %s),
                     updated_at = NOW()
                 WHERE assessment_id = %s
-            """, (f_decision, t_status, float(network_risk), existing_id))
+            """, (f_decision, t_status, h_status, l_status, float(network_risk), existing_id))
             conn.commit()
             return existing_id
 
@@ -82,7 +110,10 @@ def save_transaction_risk_assessment(
                 risk_level, prediction_probability,
                 top_risk_factors, risk_reasons, coordinator_result,
                 model_version, decision_status, final_decision,
-                transaction_status, flagged, created_at, updated_at
+                transaction_status, flagged,
+                transaction_type, device_ip, location, account_type,
+                honeypot_status, lien_status,
+                created_at, updated_at
             ) VALUES (
                 %s, %s, %s,
                 %s, %s,
@@ -92,11 +123,16 @@ def save_transaction_risk_assessment(
                 %s, %s,
                 %s, %s, %s,
                 %s, %s, %s,
-                %s, %s, NOW(), NOW()
+                %s, %s,
+                %s, %s, %s, %s,
+                %s, %s,
+                NOW(), NOW()
             )
             ON CONFLICT (assessment_id) DO UPDATE SET
                 final_decision = EXCLUDED.final_decision,
                 transaction_status = EXCLUDED.transaction_status,
+                honeypot_status = EXCLUDED.honeypot_status,
+                lien_status = EXCLUDED.lien_status,
                 network_risk = EXCLUDED.network_risk,
                 updated_at = NOW()
         """, (
@@ -109,6 +145,8 @@ def save_transaction_risk_assessment(
             factors_json, reasons_json, coord_json,
             model_version, decision_status, f_decision,
             t_status, flagged,
+            t_type, dev, loc, acc_t,
+            h_status, l_status,
         ))
     conn.commit()
     return assessment_id
@@ -117,13 +155,15 @@ def save_transaction_risk_assessment(
 def get_recent_transaction_risk_assessments(
     conns: Dict[str, psycopg2.extensions.connection],
     bank: str = "ALL",
-    limit: int = 50,
+    limit: int = 60,
     offset: int = 0,
     flagged_only: bool = False,
     risk_level: Optional[str] = None,
+    status_filter: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Fetches recent transaction_risk_assessments across one or all bank databases.
+    Supports filtering by risk_level ('LOW', 'MEDIUM', 'HIGH') and status ('COMPLETED', 'MONITORING', 'HONEYPOT').
     """
     banks_to_query = [bank.upper()] if bank.upper() in conns else ["SBI", "AXIS", "IOB"]
     all_rows = []
@@ -138,10 +178,13 @@ def get_recent_transaction_risk_assessments(
                 params = []
 
                 if flagged_only:
-                    where_clauses.append("flagged = TRUE")
-                if risk_level:
-                    where_clauses.append("risk_level = %s")
+                    where_clauses.append("(flagged = TRUE OR risk_level = 'HIGH' OR transaction_status = 'HONEYPOT')")
+                if risk_level and risk_level.upper() != "ALL":
+                    where_clauses.append("UPPER(risk_level) = %s")
                     params.append(risk_level.upper())
+                if status_filter and status_filter.upper() != "ALL":
+                    where_clauses.append("UPPER(transaction_status) = %s")
+                    params.append(status_filter.upper())
 
                 where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
                 cur.execute(f"""
@@ -154,7 +197,14 @@ def get_recent_transaction_risk_assessments(
                         risk_level, prediction_probability,
                         top_risk_factors, risk_reasons, coordinator_result,
                         model_version, decision_status, final_decision,
-                        transaction_status, flagged, created_at, updated_at
+                        transaction_status, flagged,
+                        COALESCE(transaction_type, 'UPI') as transaction_type,
+                        COALESCE(device_ip, 'Mobile:192.168.1.1') as device_ip,
+                        COALESCE(location, 'Chennai') as location,
+                        COALESCE(account_type, 'PERSONAL') as account_type,
+                        COALESCE(honeypot_status, 'NONE') as honeypot_status,
+                        COALESCE(lien_status, 'NONE') as lien_status,
+                        created_at, updated_at
                     FROM transaction_risk_assessments
                     {where_sql}
                     ORDER BY created_at DESC
@@ -184,17 +234,13 @@ def get_recent_transaction_risk_assessments(
                     if isinstance(row_dict.get("updated_at"), datetime):
                         row_dict["updated_at"] = row_dict["updated_at"].isoformat()
 
-                    # Derive or format 4-class multi-category risk classification
-                    if not row_dict.get("predicted_class"):
-                        r_level = str(row_dict.get("risk_level", "LOW")).upper()
-                        if r_level == "CRITICAL":
-                            row_dict["predicted_class"] = "CRITICAL_FRAUD"
-                        elif r_level == "HIGH":
-                            row_dict["predicted_class"] = "MULE_FLOW"
-                        elif r_level == "MEDIUM":
-                            row_dict["predicted_class"] = "SUSPICIOUS"
-                        else:
-                            row_dict["predicted_class"] = "NORMAL"
+                    # Guarantee 3-tier risk level (no CRITICAL)
+                    lvl = str(row_dict.get("risk_level", "LOW")).upper()
+                    if lvl == "CRITICAL":
+                        row_dict["risk_level"] = "HIGH"
+                    elif lvl not in ("LOW", "MEDIUM", "HIGH"):
+                        s = float(row_dict.get("xgboost_risk_score", 0.0))
+                        row_dict["risk_level"] = "HIGH" if s > 60.0 else ("MEDIUM" if s > 30.0 else "LOW")
 
                     all_rows.append(row_dict)
         except Exception as e:
@@ -206,15 +252,15 @@ def get_recent_transaction_risk_assessments(
 
 def get_xgboost_summary_stats(conns: Dict[str, psycopg2.extensions.connection], bank: str = "ALL") -> Dict[str, Any]:
     """
-    Returns aggregate KPIs: total predictions, flagged count, level counts, avg scores.
+    Returns aggregate KPIs: total predictions, flagged count, 3-tier level counts, avg scores.
     """
     banks_to_query = [bank.upper()] if bank.upper() in conns else ["SBI", "AXIS", "IOB"]
     total_assessed = 0
     total_flagged = 0
-    total_restricted = 0
+    total_monitoring = 0
+    total_honeypot = 0
     sum_score = 0.0
-    sum_combined = 0.0
-    level_counts = {"LOW": 0, "MEDIUM": 0, "HIGH": 0, "CRITICAL": 0}
+    level_counts = {"LOW": 0, "MEDIUM": 0, "HIGH": 0}
 
     for b in banks_to_query:
         conn = conns.get(b)
@@ -225,20 +271,20 @@ def get_xgboost_summary_stats(conns: Dict[str, psycopg2.extensions.connection], 
                 cur.execute("""
                     SELECT 
                         COUNT(*),
-                        COUNT(*) FILTER (WHERE flagged = TRUE),
-                        COUNT(*) FILTER (WHERE transaction_status = 'RESTRICTED'),
-                        COALESCE(AVG(xgboost_risk_score), 0.0),
-                        COALESCE(AVG(combined_risk_score), 0.0)
+                        COUNT(*) FILTER (WHERE flagged = TRUE OR risk_level IN ('HIGH', 'CRITICAL')),
+                        COUNT(*) FILTER (WHERE transaction_status = 'MONITORING'),
+                        COUNT(*) FILTER (WHERE transaction_status IN ('HONEYPOT', 'RESTRICTED')),
+                        COALESCE(AVG(xgboost_risk_score), 0.0)
                     FROM transaction_risk_assessments
                 """)
                 row = cur.fetchone()
                 if row:
-                    cnt, flg, rst, avg_s, avg_c = row
+                    cnt, flg, mon, hny, avg_s = row
                     total_assessed += cnt
                     total_flagged += flg
-                    total_restricted += rst
+                    total_monitoring += mon
+                    total_honeypot += hny
                     sum_score += avg_s * cnt
-                    sum_combined += avg_c * cnt
 
                 cur.execute("""
                     SELECT risk_level, COUNT(*)
@@ -246,83 +292,26 @@ def get_xgboost_summary_stats(conns: Dict[str, psycopg2.extensions.connection], 
                     GROUP BY risk_level
                 """)
                 for lvl, l_cnt in cur.fetchall():
-                    if lvl in level_counts:
-                        level_counts[lvl] += l_cnt
+                    u_lvl = str(lvl).upper()
+                    if u_lvl == "CRITICAL":
+                        level_counts["HIGH"] += l_cnt
+                    elif u_lvl in level_counts:
+                        level_counts[u_lvl] += l_cnt
+                    else:
+                        level_counts["LOW"] += l_cnt
         except Exception:
             pass
 
-    avg_score = round(sum_score / total_assessed, 2) if total_assessed > 0 else 0.0
-    avg_combined = round(sum_combined / total_assessed, 2) if total_assessed > 0 else 0.0
+    avg_score = round(sum_score / total_assessed, 1) if total_assessed > 0 else 0.0
     flag_rate = round((total_flagged / total_assessed) * 100, 1) if total_assessed > 0 else 0.0
 
     return {
         "bank": bank,
         "total_assessed": total_assessed,
         "total_flagged": total_flagged,
-        "total_restricted": total_restricted,
+        "total_monitoring": total_monitoring,
+        "total_honeypot": total_honeypot,
         "flagged_percentage": flag_rate,
         "average_xgboost_score": avg_score,
-        "average_combined_score": avg_combined,
         "level_counts": level_counts,
     }
-
-
-def get_assessment_by_transaction_id(
-    conns: Dict[str, psycopg2.extensions.connection],
-    transaction_id: str,
-) -> Optional[Dict[str, Any]]:
-    """
-    Idempotency lookup: checks across banks for an already computed assessment for transaction_id.
-    """
-    for bank_name, conn in conns.items():
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT 
-                        assessment_id, transaction_id, bank,
-                        sender_account_id, receiver_account_id,
-                        sender_bank, receiver_bank, amount,
-                        sender_risk_score, receiver_risk_score,
-                        xgboost_risk_score, combined_risk_score, network_risk,
-                        risk_level, prediction_probability,
-                        top_risk_factors, risk_reasons, coordinator_result,
-                        model_version, decision_status, final_decision,
-                        transaction_status, flagged, created_at
-                    FROM transaction_risk_assessments
-                    WHERE transaction_id = %s
-                    LIMIT 1
-                """, (transaction_id,))
-                r = cur.fetchone()
-                if r:
-                    factors = json.loads(r[15]) if isinstance(r[15], str) else (r[15] or [])
-                    reasons = json.loads(r[16]) if isinstance(r[16], str) else (r[16] or [])
-                    coord = json.loads(r[17]) if isinstance(r[17], str) else (r[17] or {})
-                    return {
-                        "assessment_id": r[0],
-                        "transaction_id": r[1],
-                        "bank": r[2],
-                        "sender_account_id": r[3],
-                        "receiver_account_id": r[4],
-                        "sender_bank": r[5],
-                        "receiver_bank": r[6],
-                        "amount": int(r[7] or 0),
-                        "sender_risk_score": float(r[8] or 0.0),
-                        "receiver_risk_score": float(r[9] or 0.0),
-                        "xgboost_risk_score": float(r[10] or 0.0),
-                        "combined_risk_score": float(r[11] or 0.0),
-                        "network_risk": float(r[12] or 0.0),
-                        "risk_level": r[13],
-                        "prediction_probability": float(r[14] or 0.0),
-                        "top_risk_factors": factors,
-                        "risk_reasons": reasons,
-                        "coordinator_result": coord,
-                        "model_version": r[18],
-                        "decision_status": r[19],
-                        "final_decision": r[20],
-                        "transaction_status": r[21],
-                        "flagged": bool(r[22]),
-                        "created_at": r[23].isoformat() if r[23] else None,
-                    }
-        except Exception:
-            continue
-    return None
