@@ -5,8 +5,7 @@ Version: 2.0.0 (Up to Date)
 ================================================================================
 
 WELCOME TO THE PROJECT!
-This file gives you and your Antigravity AI assistant all the information
-needed to understand, set up, and run the entire multi-bank platform.
+This file gives you all the information needed to understand, set up, and run the entire multi-bank platform.
 
 --------------------------------------------------------------------------------
 1. WHAT IS THIS PROJECT?
