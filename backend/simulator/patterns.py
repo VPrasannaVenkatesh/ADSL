@@ -152,7 +152,17 @@ class NetworkPatternGenerator:
         node_a = random.choice(sbi_accs)
         node_b = random.choice(axis_accs)
         node_c = random.choice(iob_accs)
-        node_d = random.choice([a for a in cluster["all"] if a["account_id"] not in (node_a["account_id"], node_b["account_id"], node_c["account_id"])])
+        
+        # In ~30% of multi-hop flows, designate an innocent merchant/retail counterparty as the terminal node
+        genuine_sinks = [
+            a for b in BANK_NAMES for a in self.account_mgr.accounts_by_bank[b]
+            if a["account_id"] not in (node_a["account_id"], node_b["account_id"], node_c["account_id"])
+            and (a.get("account_type") == "BUSINESS" or a.get("current_balance", 0) > 100000)
+        ]
+        if random.random() < 0.30 and genuine_sinks:
+            node_d = random.choice(genuine_sinks)
+        else:
+            node_d = random.choice([a for a in cluster["all"] if a["account_id"] not in (node_a["account_id"], node_b["account_id"], node_c["account_id"])])
 
         amount_1 = random.randint(15000, 45000)
         amount_1 = min(amount_1, int(node_a["current_balance"] * 0.9))
@@ -301,9 +311,19 @@ class NetworkPatternGenerator:
         if len(remaining) < 4:
             return
 
-        # Pick 3 intermediate mules and 1 distinct sink account
+        # Pick 3 intermediate mules
         mules = remaining[:3]
-        sink = remaining[3]
+
+        # In ~30% of mule sink sequences, designate an innocent merchant/retail counterparty as the terminal sink
+        genuine_sinks = [
+            a for b in BANK_NAMES for a in self.account_mgr.accounts_by_bank[b]
+            if a["account_id"] != source["account_id"] and a["account_id"] not in [m["account_id"] for m in mules]
+            and (a.get("account_type") == "BUSINESS" or a.get("current_balance", 0) > 100000)
+        ]
+        if random.random() < 0.30 and genuine_sinks:
+            sink = random.choice(genuine_sinks)
+        else:
+            sink = remaining[3]
 
         total_amount = min(int(source["current_balance"] * 0.85), random.randint(30000, 90000))
         steps = self.build_mule_sink_steps(source, mules, sink, total_amount, base_time)

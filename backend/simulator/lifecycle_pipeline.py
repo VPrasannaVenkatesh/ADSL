@@ -343,6 +343,45 @@ class TransactionLifecyclePipeline:
                 risk_score=comb_score,
             )
 
+        # ── Step 14B: DYNAMIC BEHAVIOURAL MONITORING REGISTRATION ────────────
+        if final_status == "MONITORING":
+            try:
+                from coordinator.monitoring_manager import GLOBAL_MONITORING_MANAGER
+                GLOBAL_MONITORING_MANAGER.register_case(
+                    transaction_id=rec.transaction_id,
+                    account_id=sender_account_id,
+                    counterparty_account_id=receiver_account_id,
+                    bank=sender_bank,
+                    amount=float(amount),
+                    risk_score=float(comb_score),
+                    reason=f"Medium-risk score ({comb_score:.1f}) requiring behavioural monitoring",
+                )
+            except Exception as _mon_err:
+                print(f"[Lifecycle Monitoring] Error registering case: {_mon_err}")
+
+        # ── Step 14C: RL INVESTIGATION AGENT DECISION ─────────────────────────
+        rl_decision = None
+        if final_status in ("HONEYPOT", "UNDER_REVIEW", "RESTRICTED", "FROZEN", "MONITORING"):
+            try:
+                from network_monitoring.rl_investigation_engine import GLOBAL_RL_AGENT
+                is_genuine_receiver = (r_risk_score <= 30.0 and (not combined_result.get("flagged", False)))
+                rl_decision = GLOBAL_RL_AGENT.decide_investigation_action(
+                    network_id=f"NET-SIM-{rec.transaction_id[:8]}",
+                    transaction_id=rec.transaction_id,
+                    network_risk_score=float(comb_score),
+                    max_mule_probability=float(combined_result.get("prediction_probability", 0.5)),
+                    suspicious_node_count=1 if final_status == "MONITORING" else 2,
+                    current_hops_analyzed=min(4, max(1, len(network_analysis.get("detected_patterns", [])) + 1)),
+                    graph_density=0.35,
+                    recent_suspicious_tx_count=1,
+                    lien_active=(lien_receipt is not None),
+                    node_count=2,
+                    is_genuine_recipient=is_genuine_receiver,
+                    genuine_account_id=receiver_account_id if is_genuine_receiver else None,
+                )
+            except Exception as _rl_err:
+                print(f"[Lifecycle RL Agent] Error evaluating action: {_rl_err}")
+
         # ── Step 8: FINALIZE STATUS & HALT FLOW IF STOPPED ───────────────────
         rec.status = final_status
         rec.flow_stopped = final_status in ("HONEYPOT", "UNDER_REVIEW", "RESTRICTED", "FROZEN")
