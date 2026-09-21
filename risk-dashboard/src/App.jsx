@@ -216,9 +216,114 @@ export default function App() {
       </header>
 
       {/* Main View Area */}
-      <div style={{ padding: '24px 32px', maxWidth: '1440px', margin: '0 auto', width: '100%', flex: 1 }}>
+      <div style={{ padding: '20px 28px', maxWidth: '1480px', margin: '0 auto', width: '100%', flex: 1 }}>
+        {/* Operational Security Intelligence Bar */}
+        <div style={{
+          background: 'rgba(15, 23, 42, 0.75)',
+          border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: 8,
+          padding: '10px 18px',
+          marginBottom: 16,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 12,
+          fontSize: '0.78rem',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#94A3B8' }}>
+              <Building2 size={14} color="#60A5FA" />
+              <span>Monitored Accounts:</span>
+              <strong style={{ color: '#F8FAFC', fontFamily: 'monospace' }}>
+                {selectedBank === 'ALL' ? '3,000 Accounts (Consortium)' : `1,000 Accounts (${selectedBank})`}
+              </strong>
+            </div>
+
+            <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.1)' }} />
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#94A3B8' }}>
+              <Lock size={14} color="#F87171" />
+              <span>High/Critical Threat Ratio:</span>
+              <strong style={{ color: '#F87171', fontFamily: 'monospace' }}>
+                {summary?.summary?.total > 0
+                  ? (((summary.summary.HIGH + summary.summary.CRITICAL) / summary.summary.total) * 100).toFixed(1)
+                  : '0.0'}%
+              </strong>
+            </div>
+
+            <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.1)' }} />
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#94A3B8' }}>
+              <Shield size={14} color="#34D399" />
+              <span>Core Protection Mode:</span>
+              <span style={{ color: '#34D399', fontWeight: 700 }}>Active Autonomous Deflection</span>
+            </div>
+          </div>
+
+          <button
+            onClick={() => {
+              const printWin = window.open('', '_blank', 'width=900,height=750');
+              if (!printWin) return;
+              const s = summary?.summary || {};
+              printWin.document.write(`
+                <html>
+                <head>
+                  <title>Bank SOC Daily Risk Incident Audit</title>
+                  <style>
+                    body { font-family: sans-serif; padding: 20px; color: #0F172A; font-size: 12px; }
+                    h2 { margin-bottom: 4px; text-transform: uppercase; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+                    th, td { border: 1px solid #CBD5E1; padding: 8px; text-align: left; font-size: 11px; }
+                    th { background: #F1F5F9; font-weight: bold; }
+                  </style>
+                </head>
+                <body>
+                  <h2>Bank Security Operations Console (SOC) — Daily Incident Log</h2>
+                  <p>Bank: <strong>${selectedBank}</strong> | Generated: ${new Date().toLocaleString()}</p>
+                  <hr>
+                  <h3>Risk Assessment Breakdown</h3>
+                  <p>Total Assessments: <strong>${s.total || 0}</strong> | Low: ${s.LOW || 0} | Medium: ${s.MEDIUM || 0} | High: ${s.HIGH || 0} | Critical: ${s.CRITICAL || 0}</p>
+                  <h3>Recent Risk Alerts</h3>
+                  <table>
+                    <tr><th>Tx ID</th><th>Account</th><th>Amount</th><th>Risk Score</th><th>Level</th><th>Type</th></tr>
+                    ${assessments.slice(0, 25).map(a => `
+                      <tr>
+                        <td>${a.transaction_id}</td>
+                        <td>${a.account_id}</td>
+                        <td>₹${a.amount?.toLocaleString()}</td>
+                        <td>${a.final_risk_score}</td>
+                        <td><strong>${a.risk_level}</strong></td>
+                        <td>${a.transaction_type}</td>
+                      </tr>
+                    `).join('')}
+                  </table>
+                  <br><button onclick="window.print()">Print / Save as PDF</button>
+                </body>
+                </html>
+              `);
+              printWin.document.close();
+            }}
+            style={{
+              padding: '5px 12px',
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: 6,
+              color: '#F8FAFC',
+              cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: '0.74rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <span>Print SOC Incident Log (PDF)</span>
+          </button>
+        </div>
+
         {/* KPI Summary Cards */}
-        <div style={{ marginBottom: 24 }}>
+        <div style={{ marginBottom: 20 }}>
           <SummaryCards summary={summary} />
         </div>
 

@@ -32,11 +32,11 @@ assert abs(sum(RISK_WEIGHTS.values()) - 1.0) < 1e-6, "Risk weights must sum to 1
 
 
 def score_to_level(score: float) -> str:
-    if score <= 30:
+    if score <= 30.0:
         return "LOW"
-    elif score <= 60:
+    elif score <= 55.0:
         return "MEDIUM"
-    elif score <= 80:
+    elif score <= 75.0:
         return "HIGH"
     else:
         return "CRITICAL"
@@ -72,7 +72,8 @@ def run_risk_assessment(
     role: str = "SENDER",
 ) -> RiskAssessmentResult:
     """
-    Runs all 8 risk component calculators, applies weights, and returns a full assessment.
+    Runs all 8 risk component calculators, applies weights with non-linear multi-anomaly boosting,
+    and returns a full assessment.
     """
     if not features:
         return None
@@ -89,7 +90,10 @@ def run_risk_assessment(
     tim_score,  tim_reasons  = calculate_timing_risk(features)
     net_score,  net_reasons  = calculate_network_pattern_risk(features)
 
-    final = (
+    scores = [amt_score, vel_score, beh_score, dev_score, loc_score, ctp_score, tim_score, net_score]
+
+    # Base weighted linear sum
+    base_score = (
         amt_score  * RISK_WEIGHTS["amount_risk"]              +
         vel_score  * RISK_WEIGHTS["velocity_risk"]            +
         beh_score  * RISK_WEIGHTS["behaviour_deviation_risk"] +
@@ -99,6 +103,26 @@ def run_risk_assessment(
         tim_score  * RISK_WEIGHTS["timing_risk"]              +
         net_score  * RISK_WEIGHTS["network_pattern_risk"]
     )
+
+    # Multi-anomaly synergy booster: In banking security, compounding anomalies
+    # (e.g. high velocity + high amount + network anomaly) represent acute fraud risk.
+    severe_count = sum(1 for s in scores if s >= 50.0)
+    critical_count = sum(1 for s in scores if s >= 70.0)
+    peak_score = max(scores) if scores else 0.0
+
+    if critical_count >= 2:
+        # Multiple critical signals compound risk to HIGH or CRITICAL
+        boosted = max(base_score * 1.5, base_score * 0.45 + peak_score * 0.55)
+        final = boosted + 10.0 * (critical_count - 1)
+    elif severe_count >= 2:
+        # Compound warning
+        final = max(base_score * 1.25, base_score * 0.6 + peak_score * 0.4)
+    elif peak_score >= 80.0:
+        # Single acute outlier
+        final = max(base_score, peak_score * 0.75)
+    else:
+        final = base_score
+
     final = round(min(100.0, max(0.0, final)), 2)
 
     # Collect non-trivial reasons only (max 8 most informative)

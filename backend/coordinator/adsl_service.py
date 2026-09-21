@@ -417,6 +417,7 @@ def process_adsl_transaction(tx_data: Dict[str, Any]) -> Dict[str, Any]:
     if network_info:
         try:
             from network_monitoring.rl_investigation_engine import GLOBAL_RL_AGENT
+            is_genuine_receiver = (float(r_risk.get("risk_score", 0.0) or 0.0) <= 30.0 and float(gnn_mule_prob or 0.0) < 0.35)
             rl_decision = GLOBAL_RL_AGENT.decide_investigation_action(
                 network_id=network_info.get("network_id", "MN-DEFAULT"),
                 transaction_id=tx_id,
@@ -428,6 +429,8 @@ def process_adsl_transaction(tx_data: Dict[str, Any]) -> Dict[str, Any]:
                 recent_suspicious_tx_count=len(network_info.get("edges", [])),
                 lien_active=lien_receipt is not None,
                 node_count=int(network_info.get("total_accounts", 2)),
+                is_genuine_recipient=is_genuine_receiver,
+                genuine_account_id=receiver_id if is_genuine_receiver else None,
             )
         except Exception as e:
             print(f"[ADSL] RL investigation decision error: {e}")

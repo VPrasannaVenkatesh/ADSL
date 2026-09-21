@@ -32,6 +32,12 @@ from .patterns import NetworkPatternGenerator, PendingStep
 from .normal_transaction_generator import NormalTransactionGenerator
 from .behaviour_history_updater import update_daily_account_behaviour
 
+try:
+    from risk_engine.engine import assess_transaction_risk
+    RISK_ENGINE_AVAILABLE = True
+except Exception:
+    RISK_ENGINE_AVAILABLE = False
+
 
 class LiveTransactionSimulator:
     """
@@ -481,6 +487,26 @@ class LiveTransactionSimulator:
             update_daily_account_behaviour(self.conns[result.receiver_bank], result.receiver_bank, result.receiver_account_id, txn_date)
         except Exception:
             pass
+
+        # Trigger bank-level risk assessment independently per bank & persist to risk_assessments
+        if RISK_ENGINE_AVAILABLE:
+            try:
+                assess_transaction_risk(
+                    conns=self.conns,
+                    transaction_id=result.transaction_id,
+                    sender_bank=result.sender_bank,
+                    sender_account_id=result.sender_account_id,
+                    receiver_bank=result.receiver_bank,
+                    receiver_account_id=result.receiver_account_id,
+                    amount=result.amount,
+                    tx_type=result.transaction_type,
+                    timestamp=result.transaction_timestamp,
+                    device_ip=result.device_ip,
+                    location=result.location,
+                    recipient_is_new=result.recipient_is_new,
+                )
+            except Exception as e:
+                print(f"[SIMULATOR RISK] Error assessing {result.transaction_id}: {e}")
 
     def _update_db_transaction_status(
         self,

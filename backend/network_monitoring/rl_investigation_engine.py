@@ -22,6 +22,7 @@ ACTION_EXPAND_GRAPH = "EXPAND_GRAPH"
 ACTION_ANALYSE_NEIGHBOURS = "ANALYSE_NEIGHBOURS"
 ACTION_CONTINUE_INVESTIGATION = "CONTINUE_INVESTIGATION"
 ACTION_STOP_INVESTIGATION = "STOP_INVESTIGATION"
+ACTION_STOP_GENUINE_RECIPIENT = "STOP_INVESTIGATION_GENUINE_RECIPIENT"
 ACTION_ESCALATE = "ESCALATE"
 
 ACTION_SPACE = [
@@ -29,6 +30,7 @@ ACTION_SPACE = [
     ACTION_ANALYSE_NEIGHBOURS,
     ACTION_CONTINUE_INVESTIGATION,
     ACTION_STOP_INVESTIGATION,
+    ACTION_STOP_GENUINE_RECIPIENT,
     ACTION_ESCALATE,
 ]
 
@@ -95,9 +97,12 @@ class RLInvestigationAgent:
         recent_suspicious_tx_count: int,
         lien_active: bool = True,
         node_count: int = 2,
+        is_genuine_recipient: bool = False,
+        genuine_account_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Evaluates environment state and chooses optimal investigation action.
+        Includes genuine account boundary detection to protect innocent recipients.
         """
         with self._lock:
             # 1. State vector (8 normalized features)
@@ -116,11 +121,28 @@ class RLInvestigationAgent:
             state_key = self._state_to_key(network_risk_score, current_hops_analyzed, max_mule_probability, suspicious_node_count)
             if state_key not in self.q_table:
                 # Initialize Q-values favoring prudent, decisive exploration
-                self.q_table[state_key] = np.array([1.0, 1.2, 0.8, 1.0, 1.5], dtype=float)
+                self.q_table[state_key] = np.array([1.0, 1.2, 0.8, 1.0, 1.5, 2.0], dtype=float)
 
             # 2. Policy rules for high-confidence security decisions
+
+            # CRITICAL RULE: If a mule transfers illicit funds into a genuine/innocent account
+            # (e.g., merchant payment, salary, rent, unaware victim):
+            # Terminate graph traversal immediately to prevent false-positive account freezes,
+            # and instruct the Lien Layer to apply a Targeted Inward Lien ONLY on the transferred amount.
+            if is_genuine_recipient:
+                action = ACTION_STOP_GENUINE_RECIPIENT
+                confidence = 0.96
+                acc_label = f" ({genuine_account_id})" if genuine_account_id else ""
+                reason = (
+                    f"Terminal Genuine Boundary Reached: Recipient account{acc_label} is verified as a legitimate "
+                    f"counterparty (kyc_verified, low historical risk, established baseline). Halting graph traversal to "
+                    f"prevent false-positive cascading freezes. Applying Targeted Inward Lien exclusively to the illicit "
+                    f"transferred funds while keeping customer unencumbered balance fully operational."
+                )
+                reward = 15.0  # High reward for isolating funds without contaminating normal economy
+
             # If critical evidence found (risk >= 85 or mule prob >= 0.85 and >= 2 hops): ESCALATE
-            if (network_risk_score >= 85.0 or max_mule_probability >= 0.82) and current_hops_analyzed >= 1:
+            elif (network_risk_score >= 85.0 or max_mule_probability >= 0.82) and current_hops_analyzed >= 1:
                 action = ACTION_ESCALATE
                 confidence = 0.94
                 reason = f"Conclusive mule network topology detected (Risk: {network_risk_score:.1f}, Mule Prob: {max_mule_probability:.2f}). Escalating for immediate protective restriction."

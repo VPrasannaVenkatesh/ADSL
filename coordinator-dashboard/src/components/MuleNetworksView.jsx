@@ -64,6 +64,8 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
     if (activeSubNav) setSubNav(activeSubNav);
   }, [activeSubNav]);
 
+  const isGraphView = subNav === 'graph' || subNav === 'all';
+
   const handleSubNavChange = (mode) => {
     setSubNav(mode);
     if (onSubNavChange) onSubNavChange(mode);
@@ -141,7 +143,7 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
         prevLatestTxIdRef.current = first.transaction_id;
         setSelectedTxId(first.transaction_id);
         setSelectedTx(first);
-        loadTransactionGraph(first.transaction_id, true);
+        loadTransactionGraph(first.transaction_id, false);
       }
     } catch (err) {
       console.error('Error fetching ADSL transactions:', err);
@@ -155,10 +157,13 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
       if (data) {
         setNetworkDetail(data);
         if (data.network_id) setSelectedNetwork(data.network_id);
-        if (!isSilent) {
-          setSelectedTxId(txId);
-          const found = transactions.find((t) => t.transaction_id === txId);
+        setSelectedTxId(txId);
+        setTransactions((curr) => {
+          const found = curr.find((t) => t.transaction_id === txId);
           if (found) setSelectedTx(found);
+          return curr;
+        });
+        if (!isSilent) {
           setSelectedNode(null);
           setZoomLevel(1);
           setPanOffset({ x: 0, y: 0 });
@@ -243,6 +248,23 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
     return Array.from(map.values());
   }, [transactions, monitoringCases]);
 
+  // Derive active monitoring cases from backend or mediumTransactions stream
+  const effectiveMonitoringCases = useMemo(() => {
+    if (monitoringCases && monitoringCases.length > 0) return monitoringCases;
+    return mediumTransactions.map((t, idx) => ({
+      case_id: `CASE-MON-${t.transaction_id ? t.transaction_id.slice(-6) : String(idx + 1).padStart(3, '0')}`,
+      account_id: t.sender_account_id || 'ACC-UNKNOWN',
+      counterparty_account_id: t.receiver_account_id || 'RECV-UNKNOWN',
+      bank: t.sender_bank || 'SBI',
+      amount: t.amount || 0,
+      initial_risk_score: (t.risk_score || t.final_risk_score || 45.0).toFixed(1),
+      monitoring_reason: (t.risk_reasons && t.risk_reasons[0]) || 'Velocity Surveillance / Anomalous Pattern',
+      follow_ups: 1 + (idx % 3),
+      status: 'ACTIVE',
+      transaction_id: t.transaction_id,
+    }));
+  }, [monitoringCases, mediumTransactions]);
+
   // Segregated High Risk & Mule Ring Transactions (Tier 3: >=60 Risk & Liens)
   const highTransactions = useMemo(() => {
     const map = new Map();
@@ -286,14 +308,13 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
 
   // Initial mount graph fallback - ensures graph is populated once without auto-switching later
   useEffect(() => {
-    if (!initialLoadedRef.current && displayedTransactions.length > 0 && !selectedTxId && !networkDetail) {
-      initialLoadedRef.current = true;
+    if (!networkDetail && displayedTransactions.length > 0) {
       const first = displayedTransactions[0];
       setSelectedTxId(first.transaction_id);
       setSelectedTx(first);
-      loadTransactionGraph(first.transaction_id, true);
+      loadTransactionGraph(first.transaction_id, false);
     }
-  }, [displayedTransactions, selectedTxId, networkDetail]);
+  }, [displayedTransactions, networkDetail]);
 
   // Trigger Multi-Mule Flow Simulation
   const handleTriggerMuleFlow = async () => {
@@ -422,10 +443,10 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
     1
   );
 
-  // Distributed spacing constants (generous breathing room & non-overlapping plates)
-  const minGap = 160;
-  const flowSvgWidth = 1120;
-  const flowSvgHeight = Math.max(560, maxColNodes * minGap + 120);
+  // Distributed spacing constants (optimized compact flow layout for clear visibility)
+  const minGap = 105;
+  const flowSvgWidth = 1080;
+  const flowSvgHeight = Math.max(480, maxColNodes * minGap + 90);
   const centerX = flowSvgWidth / 2;
   const centerY = flowSvgHeight / 2;
 
@@ -855,24 +876,24 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
           </div>
         </div>
 
-        {/* All Clusters Option */}
+        {/* Topology Graph Option */}
         <div
-          onClick={() => handleSubNavChange('all')}
+          onClick={() => handleSubNavChange('graph')}
           style={{
             padding: '14px 18px',
             borderRadius: '12px',
             cursor: 'pointer',
-            border: subNav === 'all' ? '1.5px solid #8B5CF6' : '1px solid rgba(255,255,255,0.08)',
-            background: subNav === 'all'
+            border: isGraphView ? '1.5px solid #8B5CF6' : '1px solid rgba(255,255,255,0.08)',
+            background: isGraphView
               ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.18) 0%, rgba(109, 40, 217, 0.08) 100%)'
               : 'rgba(15, 23, 42, 0.5)',
-            boxShadow: subNav === 'all' ? '0 0 20px rgba(139, 92, 246, 0.18)' : 'none',
+            boxShadow: isGraphView ? '0 0 20px rgba(139, 92, 246, 0.18)' : 'none',
             transition: 'all 0.2s ease',
             position: 'relative',
             overflow: 'hidden',
           }}
         >
-          {subNav === 'all' && (
+          {isGraphView && (
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg, #8B5CF6, #C084FC)' }} />
           )}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
@@ -880,17 +901,17 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
               <div style={{
                 padding: '6px',
                 borderRadius: '8px',
-                background: subNav === 'all' ? 'rgba(139, 92, 246, 0.25)' : 'rgba(255,255,255,0.05)',
+                background: isGraphView ? 'rgba(139, 92, 246, 0.25)' : 'rgba(255,255,255,0.05)',
                 color: '#A78BFA',
               }}>
                 <Network size={18} />
               </div>
               <div>
-                <div style={{ fontSize: '0.95rem', fontWeight: '800', color: subNav === 'all' ? '#FFFFFF' : '#E2E8F0' }}>
-                  All Clusters & Topology
+                <div style={{ fontSize: '0.95rem', fontWeight: '800', color: isGraphView ? '#FFFFFF' : '#E2E8F0' }}>
+                  Topology Graph & Clusters
                 </div>
                 <div style={{ fontSize: '0.68rem', color: '#C084FC', fontWeight: '700' }}>
-                  Full Multi-Bank Graph
+                  Interactive Multi-Bank Canvas
                 </div>
               </div>
             </div>
@@ -899,14 +920,14 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
               fontWeight: '900',
               padding: '3px 10px',
               borderRadius: '20px',
-              background: subNav === 'all' ? '#8B5CF6' : 'rgba(139, 92, 246, 0.15)',
-              color: subNav === 'all' ? '#FFF' : '#C084FC',
+              background: isGraphView ? '#8B5CF6' : 'rgba(139, 92, 246, 0.15)',
+              color: isGraphView ? '#FFF' : '#C084FC',
             }}>
               {transactions.length} Total
             </span>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-            Global graph topology view across SBI, AXIS, and IOB ledgers with comprehensive cluster catalog.
+            Interactive graph forensics with directed edges, flow/radial layouts, and automated RL investigation decisions.
           </div>
         </div>
       </div>
@@ -1072,7 +1093,7 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
         {/* ========================================================================= */}
         {/* SECTION 1: SEGREGATED TRANSACTIONS STREAM TABLE                           */}
         {/* ========================================================================= */}
-        <div className="card" style={{ padding: '20px', background: 'rgba(10, 15, 25, 0.85)' }}>
+        <div className="card" style={{ padding: '20px', background: 'rgba(10, 15, 25, 0.85)', order: isGraphView ? 2 : 1 }}>
           <div
             style={{
               display: 'flex',
@@ -1131,14 +1152,40 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
               </div>
             </div>
 
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-              {selectedTxId ? (
-                <span style={{ color: subNav === 'medium' ? '#FBBF24' : subNav === 'high' ? '#F87171' : '#38BDF8', fontWeight: '700' }}>
-                  Selected: <code>{selectedTxId}</code> (Graph mounted directly below)
-                </span>
-              ) : (
-                'Select a transaction to inspect graph'
-              )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <button
+                onClick={() => {
+                  document.getElementById('graph-forensics-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(56, 189, 248, 0.4)',
+                  background: 'rgba(56, 189, 248, 0.12)',
+                  color: '#38BDF8',
+                  fontSize: '0.74rem',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'all 0.15s ease',
+                }}
+                title="View interactive graph canvas"
+              >
+                <Network size={13} />
+                <span>View Graph Canvas</span>
+              </button>
+
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                {selectedTxId ? (
+                  <span style={{ color: subNav === 'medium' ? '#FBBF24' : subNav === 'high' ? '#F87171' : '#38BDF8', fontWeight: '700' }}>
+                    Selected: <code>{selectedTxId}</code>
+                  </span>
+                ) : (
+                  'Select a transaction to inspect graph'
+                )}
+              </div>
             </div>
           </div>
 
@@ -1203,6 +1250,7 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
                           setSelectedTxId(tx.transaction_id);
                           setSelectedTx(tx);
                           loadTransactionGraph(tx.transaction_id);
+                          document.getElementById('graph-forensics-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         }}
                         style={{
                           borderBottom: '1px solid rgba(255,255,255,0.05)',
@@ -1313,6 +1361,7 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
                               setSelectedTxId(tx.transaction_id);
                               setSelectedTx(tx);
                               loadTransactionGraph(tx.transaction_id);
+                              document.getElementById('graph-forensics-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                             }}
                             style={{
                               padding: '4px 10px',
@@ -1345,12 +1394,14 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
         {/* SECTION 2: INTERACTIVE GRAPH FORENSICS (DIRECTLY BELOW THE TRANSACTION)   */}
         {/* ========================================================================= */}
         <div
+          id="graph-forensics-section"
           className="card"
           style={{
             padding: '20px',
             background: 'rgba(10, 15, 25, 0.95)',
             border: '1px solid rgba(59, 130, 246, 0.4)',
             boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+            order: isGraphView ? 1 : 2,
           }}
         >
           {/* Active Transaction Banner directly at the top of the graph */}
@@ -2213,7 +2264,7 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
         {/* SECTION 3: CONDITIONAL CATALOG TABLE BASED ON ACTIVE NAVIGATION            */}
         {/* ========================================================================= */}
         {subNav === 'medium' ? (
-          <div className="card" style={{ padding: '20px', background: 'rgba(10, 15, 25, 0.85)' }}>
+          <div className="card" style={{ padding: '20px', background: 'rgba(10, 15, 25, 0.85)', order: 3 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
               <div>
                 <h3 style={{ fontSize: '0.98rem', fontWeight: '800', color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -2229,7 +2280,7 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
                       border: '1px solid rgba(245, 158, 11, 0.35)',
                     }}
                   >
-                    {monitoringCases.length} Active Cases
+                    {effectiveMonitoringCases.length} Active Cases
                   </span>
                 </h3>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
@@ -2237,7 +2288,7 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
                 </div>
               </div>
               <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                Click any case to inspect its transaction graph and behavioural baseline above
+                Click any case to inspect its transaction graph and behavioural baseline
               </span>
             </div>
 
@@ -2257,7 +2308,7 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {monitoringCases.length === 0 ? (
+                  {effectiveMonitoringCases.length === 0 ? (
                     <tr>
                       <td colSpan="9" style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
                         <ShieldAlert size={28} style={{ margin: '0 auto 8px', opacity: 0.4, color: '#F59E0B' }} />
@@ -2268,7 +2319,7 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
                       </td>
                     </tr>
                   ) : (
-                    monitoringCases.map((c) => {
+                    effectiveMonitoringCases.map((c) => {
                       const isSelected = selectedTxId === c.transaction_id;
                       return (
                         <tr
@@ -2277,6 +2328,7 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
                             if (c.transaction_id) {
                               setSelectedTxId(c.transaction_id);
                               loadTransactionGraph(c.transaction_id);
+                              document.getElementById('graph-forensics-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                             }
                           }}
                           style={{
@@ -2351,6 +2403,7 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
                                 if (c.transaction_id) {
                                   setSelectedTxId(c.transaction_id);
                                   loadTransactionGraph(c.transaction_id);
+                                  document.getElementById('graph-forensics-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                 }
                               }}
                               style={{
@@ -2380,7 +2433,7 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
             </div>
           </div>
         ) : (
-          <div className="card" style={{ padding: '20px', background: 'rgba(10, 15, 25, 0.8)' }}>
+          <div className="card" style={{ padding: '20px', background: 'rgba(10, 15, 25, 0.8)', order: 3 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
               <h3 style={{ fontSize: '0.95rem', fontWeight: '700', color: '#FFFFFF' }}>
                 Detected Mule Network Clusters
@@ -2424,7 +2477,10 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
                       return (
                         <tr
                           key={net.network_id}
-                          onClick={() => loadNetworkDetail(net.network_id)}
+                          onClick={() => {
+                            loadNetworkDetail(net.network_id);
+                            document.getElementById('graph-forensics-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          }}
                           style={{
                             borderBottom: '1px solid rgba(255,255,255,0.05)',
                             background: isSelected ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
@@ -2506,6 +2562,7 @@ export function MuleNetworksView({ activeSubNav = 'medium', onSubNavChange }) {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 loadNetworkDetail(net.network_id);
+                                document.getElementById('graph-forensics-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                               }}
                               style={{
                                 padding: '4px 10px',

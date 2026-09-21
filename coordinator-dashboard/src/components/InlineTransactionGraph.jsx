@@ -300,9 +300,9 @@ export function InlineTransactionGraph({ transactionId, initialTxData, onClose }
               }
 
               const maxColumnNodes = Math.max(rank0.length, rank1.length, rank2.length, 1);
-              const minVerticalGap = 150;
+              const minVerticalGap = 95;
               const svgWidth = 1060;
-              const svgHeight = Math.max(420, maxColumnNodes * minVerticalGap + 100);
+              const svgHeight = Math.max(380, maxColumnNodes * minVerticalGap + 70);
 
               const colPositions = [150, 530, 910];
               const columns = [rank0, rank1, rank2];

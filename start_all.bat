@@ -5,13 +5,13 @@ echo Starting Banking Behavioural Risk Analysis Platform
 echo ======================================================================
 
 echo [1/6] Launching Module 1 API and Live Simulator (Port 8000)...
-start "Backend - Simulator & API (Port 8000)" cmd /k "cd /d %~dp0backend && python -m uvicorn main:app --port 8000"
+start "Backend - Simulator & API (Port 8000)" cmd /k "cd /d %~dp0backend && python -m uvicorn main:app --port 8000 --reload"
 
 echo [2/6] Launching Module 2 Risk Monitoring API (Port 8001)...
-start "Backend - Risk API (Port 8001)" cmd /k "cd /d %~dp0backend && python -m uvicorn risk_api:app --port 8001"
+start "Backend - Risk API (Port 8001)" cmd /k "cd /d %~dp0backend && python -m uvicorn risk_api:app --port 8001 --reload"
 
 echo [3/6] Launching Module 3 Decentralized Coordinator API (Port 8002)...
-start "Backend - Coordinator API (Port 8002)" cmd /k "cd /d %~dp0backend && python -m uvicorn coordinator_api:app --port 8002"
+start "Backend - Coordinator API (Port 8002)" cmd /k "cd /d %~dp0backend && python -m uvicorn coordinator_api:app --port 8002 --reload"
 
 echo [4/6] Launching Live Transaction Simulator Dashboard (Port 5173)...
 start "Frontend - Simulator Dashboard (Port 5173)" cmd /k "cd /d %~dp0frontend && npm run dev"

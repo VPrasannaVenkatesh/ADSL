@@ -14,10 +14,12 @@ import {
   Shield,
   Layers,
   Sparkles,
+  Network,
 } from 'lucide-react';
 
 import { LiveTransactionTable } from './components/LiveTransactionTable';
 import { BankAnalyticsView } from './components/BankAnalyticsView';
+import { NetworkGraphView } from './components/NetworkGraphView';
 import { AccountDrawer } from './components/AccountDrawer';
 import { simulatorApi } from './api/simulatorApi';
 
@@ -464,6 +466,25 @@ export default function App() {
               <Building2 size={14} />
               <span>Bank Explorer</span>
             </button>
+            <button
+              onClick={() => setActiveTab('GRAPH')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '6px',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '0.78rem',
+                fontWeight: '700',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: activeTab === 'GRAPH' ? 'rgba(0, 229, 255, 0.15)' : 'transparent',
+                color: activeTab === 'GRAPH' ? 'var(--accent-cyan, #00E5FF)' : '#94A3B8',
+              }}
+            >
+              <Network size={14} />
+              <span>Network Graph</span>
+            </button>
           </div>
 
           <button
@@ -577,6 +598,12 @@ export default function App() {
           <BankAnalyticsView
             bankStats={bankStats}
             onSelectAccount={handleSelectAccount}
+          />
+        )}
+
+        {activeTab === 'GRAPH' && (
+          <NetworkGraphView
+            onSelectAccount={(accId) => handleSelectAccount('ALL', accId)}
           />
         )}
       </main>

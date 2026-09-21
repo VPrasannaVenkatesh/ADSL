@@ -6,13 +6,13 @@ Write-Host "====================================================================
 $Root = $PSScriptRoot
 
 Write-Host "[1/6] Launching Module 1 API & Live Simulator (Port 8000)..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$Root\backend'; python -m uvicorn main:app --port 8000"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$Root\backend'; python -m uvicorn main:app --port 8000 --reload"
 
 Write-Host "[2/6] Launching Module 2 Risk Monitoring API (Port 8001)..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$Root\backend'; python -m uvicorn risk_api:app --port 8001"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$Root\backend'; python -m uvicorn risk_api:app --port 8001 --reload"
 
 Write-Host "[3/6] Launching Module 3 Decentralized Coordinator API (Port 8002)..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$Root\backend'; python -m uvicorn coordinator_api:app --port 8002"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$Root\backend'; python -m uvicorn coordinator_api:app --port 8002 --reload"
 
 Write-Host "[4/6] Launching Live Transaction Simulator Dashboard (Port 5173)..." -ForegroundColor Yellow
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$Root\frontend'; npm run dev"
