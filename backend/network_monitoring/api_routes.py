@@ -23,6 +23,110 @@ class ReleaseLienRequest(BaseModel):
     reason: str
 
 
+@network_router.get("/graph")
+def get_filtered_network_graph(
+    bank: str = Query("ALL", description="ALL, SBI, AXIS, IOB"),
+    cross_bank_only: bool = Query(False),
+    min_amount: float = Query(0.0),
+    limit: int = Query(120, ge=1, le=500),
+    account_id: Optional[str] = Query(None),
+):
+    """
+    Returns graph representation (nodes, edges, metadata) filtered dynamically by bank,
+    cross-bank transfers, minimum amount, edge limit, and specific account ID.
+    """
+    from simulator.db import get_connection
+    from simulator.config import BANK_NAMES
+    target_banks = [bank.upper()] if bank.upper() in ("SBI", "AXIS", "IOB") else BANK_NAMES
+
+    raw_edges = []
+    nodes_dict = {}
+
+    for b in target_banks:
+        try:
+            conn = get_connection(b)
+            with conn.cursor() as cur:
+                where_clauses = ["1=1"]
+                params = []
+                if cross_bank_only:
+                    where_clauses.append("sender_bank != receiver_bank")
+                if min_amount > 0:
+                    where_clauses.append("amount >= %s")
+                    params.append(min_amount)
+                if account_id:
+                    where_clauses.append("(sender_account_id = %s OR receiver_account_id = %s)")
+                    params.extend([account_id, account_id])
+
+                sql = f"""
+                    SELECT transaction_id, sender_account_id, sender_bank,
+                           receiver_account_id, receiver_bank, amount,
+                           transaction_status, COALESCE(honeypot_status, 'NOT_TRANSFERRED'),
+                           COALESCE(lien_status, 'NO_LIEN'), transaction_timestamp, transaction_type
+                    FROM transactions
+                    WHERE {' AND '.join(where_clauses)}
+                    ORDER BY id DESC LIMIT %s
+                """
+                params.append(limit)
+                cur.execute(sql, tuple(params))
+                for r in cur.fetchall():
+                    raw_edges.append({
+                        "id": r[0],
+                        "transaction_id": r[0],
+                        "source": r[1],
+                        "target": r[3],
+                        "sender_bank": r[2],
+                        "receiver_bank": r[4],
+                        "amount": float(r[5]),
+                        "status": r[6] or "COMPLETED",
+                        "honeypot_status": r[7],
+                        "lien_status": r[8],
+                        "is_cross_bank": (r[2] != r[4]),
+                        "flow_stopped": r[6] in ("HONEYPOT", "UNDER_REVIEW", "RESTRICTED", "FROZEN"),
+                        "timestamp": r[9].isoformat() if r[9] else None,
+                        "transaction_type": r[10] or "UPI",
+                    })
+                    if r[1] not in nodes_dict:
+                        nodes_dict[r[1]] = {"id": r[1], "account_id": r[1], "bank": r[2]}
+                    if r[3] not in nodes_dict:
+                        nodes_dict[r[3]] = {"id": r[3], "account_id": r[3], "bank": r[4]}
+            conn.close()
+        except Exception as e:
+            print(f"[GRAPH API ERROR]: {e}")
+
+    # Deduplicate edges by transaction_id & sort newest first
+    seen_tx = set()
+    deduped_edges = []
+    for e in sorted(raw_edges, key=lambda x: x["timestamp"] or "", reverse=True):
+        if e["transaction_id"] not in seen_tx:
+            seen_tx.add(e["transaction_id"])
+            deduped_edges.append(e)
+            if len(deduped_edges) >= limit:
+                break
+
+    # Recompute nodes active in the final edge set
+    active_nodes = {}
+    for e in deduped_edges:
+        if e["source"] in nodes_dict:
+            active_nodes[e["source"]] = nodes_dict[e["source"]]
+        if e["target"] in nodes_dict:
+            active_nodes[e["target"]] = nodes_dict[e["target"]]
+
+    return {
+        "graph": {
+            "nodes": list(active_nodes.values()),
+            "edges": deduped_edges,
+        },
+        "metadata": {
+            "total_nodes": len(active_nodes),
+            "total_edges": len(deduped_edges),
+            "bank": bank,
+            "cross_bank_only": cross_bank_only,
+            "min_amount": min_amount,
+            "limit": limit,
+        }
+    }
+
+
 @network_router.get("/graph-summary")
 def get_graph_summary():
     """Returns real-time topological statistics of the multi-bank transaction graph."""

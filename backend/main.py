@@ -80,6 +80,7 @@ app.include_router(adsl_router)
 app.include_router(network_router)
 app.include_router(xgboost_router)
 app.include_router(gnn_router)
+# Registered network graph router
 
 
 @app.on_event("startup")

@@ -105,6 +105,19 @@ const HONEYPOT_CONFIG = {
     color: '#34D399',
     border: '1px solid rgba(52, 211, 153, 0.4)',
   },
+  // Fallbacks for historical or raw statuses
+  HONEYPOT: {
+    label: 'TRANSFERRED',
+    bg: 'rgba(6, 182, 212, 0.18)',
+    color: '#22D3EE',
+    border: '1px solid rgba(6, 182, 212, 0.45)',
+  },
+  NONE: {
+    label: 'NO',
+    bg: 'rgba(148, 163, 184, 0.08)',
+    color: '#94A3B8',
+    border: '1px solid rgba(148, 163, 184, 0.2)',
+  },
 };
 
 const LIEN_CONFIG = {
@@ -125,6 +138,25 @@ const LIEN_CONFIG = {
     bg: 'rgba(52, 211, 153, 0.18)',
     color: '#34D399',
     border: '1px solid rgba(52, 211, 153, 0.4)',
+  },
+  // Fallbacks for historical or raw receipt statuses
+  LIEN: {
+    label: 'LIEN HELD',
+    bg: 'rgba(249, 115, 22, 0.2)',
+    color: '#FB923C',
+    border: '1px solid rgba(249, 115, 22, 0.45)',
+  },
+  RESTRICTED: {
+    label: 'LIEN HELD',
+    bg: 'rgba(249, 115, 22, 0.2)',
+    color: '#FB923C',
+    border: '1px solid rgba(249, 115, 22, 0.45)',
+  },
+  NONE: {
+    label: 'NO',
+    bg: 'rgba(148, 163, 184, 0.08)',
+    color: '#94A3B8',
+    border: '1px solid rgba(148, 163, 184, 0.2)',
   },
 };
 
@@ -680,6 +712,18 @@ export function LiveTransactionTable({
                                 </span>
                               </div>
                             )}
+                            <div>
+                              <span style={{ color: 'var(--text-muted)' }}>Honeypot Decoy:</span>{' '}
+                              <strong style={{ color: hpCfg.color }}>
+                                {hpCfg.label === 'TRANSFERRED' ? 'Transferred to Decoy Honeypot' : (hpCfg.label === 'RELEASED' ? 'Released from Honeypot' : 'Direct Account Routing (No Decoy)')}
+                              </strong>
+                            </div>
+                            <div>
+                              <span style={{ color: 'var(--text-muted)' }}>Lien Enforcement:</span>{' '}
+                              <strong style={{ color: lienCfg.color }}>
+                                {lienCfg.label === 'LIEN HELD' ? 'Active Capital Quarantine (Funds Protected)' : (lienCfg.label === 'RELEASED' ? 'Lien Cleared / Released' : 'Unencumbered (No Legal Lien)')}
+                              </strong>
+                            </div>
                           </div>
                         </td>
                       </tr>

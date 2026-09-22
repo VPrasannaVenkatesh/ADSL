@@ -42,7 +42,7 @@ def get_recent_adsl_transactions(limit: int = 60) -> List[Dict[str, Any]]:
         return list(RECENT_ADSL_TRANSACTIONS[:limit])
 
 
-def _update_bank_tx_status(bank: str, tx_id: str, new_status: str, honeypot_status: str = "NONE", lien_status: str = "NONE"):
+def _update_bank_tx_status(bank: str, tx_id: str, new_status: str, honeypot_status: str = "NOT_TRANSFERRED", lien_status: str = "NO_LIEN"):
     """Safely updates transactions table across bank databases with status and honeypot/lien flags."""
     try:
         from simulator.db_connection import get_all_bank_connections
@@ -351,7 +351,7 @@ def process_adsl_transaction(tx_data: Dict[str, Any]) -> Dict[str, Any]:
     if transaction_risk_score > 60.0 or gnn_tracked_mule or gnn_mule_prob >= 0.40:
         final_status = "HONEYPOT"
         final_decision = "HONEYPOT"
-        h_status = "HONEYPOT"
+        h_status = "TRANSFERRED"
         l_status = "LIEN_APPLIED"
 
         # Apply protective lien on recipient account
@@ -417,7 +417,7 @@ def process_adsl_transaction(tx_data: Dict[str, Any]) -> Dict[str, Any]:
     if network_info:
         try:
             from network_monitoring.rl_investigation_engine import GLOBAL_RL_AGENT
-            is_genuine_receiver = (float(r_risk.get("risk_score", 0.0) or 0.0) <= 30.0 and float(gnn_mule_prob or 0.0) < 0.35)
+            is_genuine_receiver = (receiver_risk_score <= 30.0 and float(gnn_mule_prob or 0.0) < 0.35)
             rl_decision = GLOBAL_RL_AGENT.decide_investigation_action(
                 network_id=network_info.get("network_id", "MN-DEFAULT"),
                 transaction_id=tx_id,
@@ -553,16 +553,21 @@ def execute_adsl_admin_action(
     try:
         from simulator.db_connection import get_all_bank_connections
         conns = get_all_bank_connections()
+        h_stat = "RELEASED" if new_status == "RELEASED" else ("TRANSFERRED" if new_status in ("HONEYPOT", "RESTRICTED", "FROZEN") else "NOT_TRANSFERRED")
+        l_stat = "LIEN_RELEASED" if new_status == "RELEASED" else ("LIEN_APPLIED" if new_status in ("RESTRICTED", "FROZEN", "LIEN_APPLIED", "HONEYPOT") else "NO_LIEN")
         for b, c in conns.items():
             with c.cursor() as cur:
-                cur.execute(
-                    "UPDATE transactions SET transaction_status = %s WHERE transaction_id = %s",
-                    (new_status, transaction_id)
-                )
+                cur.execute("""
+                    UPDATE transactions SET
+                        transaction_status = %s,
+                        honeypot_status = %s,
+                        lien_status = %s
+                    WHERE transaction_id = %s
+                """, (new_status, h_stat, l_stat, transaction_id))
             c.commit()
             c.close()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[ADSL] Admin tx status update error: {e}")
 
     return {
         "success": True,

@@ -76,4 +76,9 @@ export const simulatorApi = {
     const res = await api.get(`/accounts/${bank}/${accountId}`);
     return res.data;
   },
+
+  getNetworkGraph: async (params = {}) => {
+    const res = await api.get('/network/graph', { params });
+    return res.data;
+  },
 };
